@@ -122,7 +122,7 @@ describe('User Profile', () => {
     cy.get('.username').should('have.text', 'john_doe');
     cy.get('.email').should('have.text', 'john@example.com');
     cy.get('.member-since').should('contain', '2023');
-    cy.get('.posts-count').should('have.text', '42
+    cy.get('.posts-count').should('have.text', '42');
   
   // Chained assertions
   cy.get('.button')
@@ -170,6 +170,8 @@ describe('Test Suite', () => {
   // Run only this test
   soft_it.only('validates important fields', () => {
     cy.get('.field1').should('exist');
+```
+
 The plugin supports `.only` and `.skip` modifiers just like regular `it()`:
 
 ```typescript
@@ -285,9 +287,3 @@ SOFT ASSERTION FAILURES (4 failed):
   4. expected '<div.grand-total>' to contain '$113.74', but it contained '$102.49'
 ================================================================================
 ```
-
-## License
-
-MIT
-
-##
