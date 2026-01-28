@@ -1,0 +1,47 @@
+{
+  "name": "cypress-soft-assertions",
+  "version": "1.0.0",
+  "description": "A Cypress plugin that provides soft_it() for soft assertions - all assertions continue on failure and are reported together",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "cy:open": "cypress open",
+    "cy:run": "cypress run",
+    "test": "npm run build && cypress run"
+  },
+  "keywords": [
+    "cypress",
+    "soft-assertions",
+    "testing",
+    "automation",
+    "e2e",
+    "cypress-plugin",
+    "test",
+    "assert",
+    "assertion"
+  ],
+  "author": "Koen Van Belle",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/koenvanbelle/cypress-soft-assertions"
+  },
+  "bugs": {
+    "url": "https://github.com/koenvanbelle/cypress-soft-assertions/issues"
+  },
+  "homepage": "https://github.com/koenvanbelle/cypress-soft-assertions#readme",
+  "peerDependencies": {
+    "cypress": ">=10.0.0"
+  },
+  "devDependencies": {
+    "cypress": "^15.9.0",
+    "typescript": "^5.9.3",
+    "@types/mocha": "^10.0.10"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}
