@@ -26,12 +26,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/koenvanbelle/cypress-soft-assertions"
+    "url": "https://github.com/vanbellekoen/cypress-soft-assertions"
   },
   "bugs": {
-    "url": "https://github.com/koenvanbelle/cypress-soft-assertions/issues"
+    "url": "https://github.com/vanbellekoen/cypress-soft-assertions/issues"
   },
-  "homepage": "https://github.com/koenvanbelle/cypress-soft-assertions#readme",
+  "homepage": "https://github.com/vanbellekoen/cypress-soft-assertions#readme",
   "peerDependencies": {
     "cypress": ">=10.0.0"
   },
