@@ -1,6 +1,6 @@
 {
   "name": "@koenvanbelle/cypress-soft-assertions",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A Cypress plugin that provides soft_it() for soft assertions - all assertions continue on failure and are reported together",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -26,12 +26,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vanbellekoen/cypress-soft-assertions"
+    "url": "https://github.com/VanBelleKoen/cypress-soft-assert"
   },
   "bugs": {
-    "url": "https://github.com/vanbellekoen/cypress-soft-assertions/issues"
+    "url": "https://github.com/VanBelleKoen/cypress-soft-assert/issues"
   },
-  "homepage": "https://github.com/vanbellekoen/cypress-soft-assertions#readme",
+  "homepage": "https://github.com/VanBelleKoen/cypress-soft-assert#readme",
   "peerDependencies": {
     "cypress": ">=10.0.0"
   },
