@@ -16,13 +16,13 @@ Standard Cypress assertions stop test execution at the first failure. With `soft
 Install the plugin as a development dependency:
 
 ```bash
-npm install cypress-soft-assertions --save-dev
+npm install @koenvanbelle/cypress-soft-assertions --save-dev
 ```
 
 or using Yarn:
 
 ```bash
-yarn add cypress-soft-assertions --dev
+yarn add @koenvanbelle/cypress-soft-assertions --dev
 ```
 
 ## Integration
