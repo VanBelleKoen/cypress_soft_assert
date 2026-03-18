@@ -34,13 +34,13 @@ Add the import to your Cypress support file. This registers the `soft_it()` func
 **For TypeScript projects** - Edit `cypress/support/e2e.ts` (or `cypress/support/commands.ts`):
 
 ```typescript
-import 'cypress-soft-assertions';
+import '@koenvanbelle/cypress-soft-assertions';
 ```
 
 **For JavaScript projects** - Edit `cypress/support/e2e.js` (or `cypress/support/commands.js`):
 
 ```javascript
-require('cypress-soft-assertions');
+require('@koenvanbelle/cypress-soft-assertions');
 ```
 
 ### Step 2: Add Type Definitions (TypeScript only)
