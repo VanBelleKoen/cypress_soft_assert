@@ -35,6 +35,33 @@ function captureSoftAssertion(error: any) {
   });
 }
 
+function getCurrentCommandName() {
+  const state = (cy as any)?.state;
+  if (typeof state !== 'function') {
+    return '';
+  }
+
+  const current = state('current');
+  if (!current) {
+    return '';
+  }
+
+  if (typeof current.get === 'function') {
+    return String(current.get('name') || '');
+  }
+
+  return String(current.name || current.attributes?.name || '');
+}
+
+function isRetryTimeoutError(error: any) {
+  const message = String(error?.message || '');
+  return /Timed out retrying after/i.test(message);
+}
+
+function isRetriableAssertionCommand(commandName: string) {
+  return commandName === 'should' || commandName === 'and';
+}
+
 /**
  * Intercept Cypress failures and make assertion failures soft in soft_it() tests.
  */
@@ -42,6 +69,12 @@ function setupSoftAssertions() {
   if (!activeFailHandler) {
     activeFailHandler = (error: any) => {
       if (!isInSoftTest) {
+        throw error;
+      }
+
+      const commandName = getCurrentCommandName();
+      if (isRetriableAssertionCommand(commandName) && !isRetryTimeoutError(error)) {
+        // Let Cypress continue polling/retrying for retriable assertions.
         throw error;
       }
 
