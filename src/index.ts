@@ -13,8 +13,9 @@ interface ErrorEntry {
 
 let softAssertionErrors: ErrorEntry[] = [];
 let isInSoftTest = false;
-let originalAssert: any = null;
-const retryWindows = new Map<string, { startedAt: number; timeout: number }>();
+let activeFailHandler: ((error: any) => false | void) | null = null;
+let activeSoftTestTitle: string | null = null;
+let finalizerInstalled = false;
 
 /**
  * Track a soft assertion failure so it can be reported at test end.
@@ -35,119 +36,73 @@ function captureSoftAssertion(error: any) {
 }
 
 /**
- * Read command metadata from Cypress internals in a defensive way.
- */
-function getCurrentCommand() {
-  const state = (cy as any)?.state;
-  if (typeof state !== 'function') {
-    return null;
-  }
-
-  return state('current') || null;
-}
-
-function getCommandProp(command: any, prop: string) {
-  if (!command) {
-    return undefined;
-  }
-
-  if (typeof command.get === 'function') {
-    return command.get(prop);
-  }
-
-  if (command.attributes && prop in command.attributes) {
-    return command.attributes[prop];
-  }
-
-  return command[prop];
-}
-
-/**
- * Build retry context for the currently running Cypress command.
- */
-function getAssertionContext() {
-  const command = getCurrentCommand();
-  const commandId = String(getCommandProp(command, 'id') || getCommandProp(command, 'chainerId') || '');
-  const commandName = String(getCommandProp(command, 'name') || '');
-  const timeout = Number(getCommandProp(command, 'timeout')) || Number(Cypress.config('defaultCommandTimeout'));
-  const isRetriable = commandName === 'should' || commandName === 'and';
-
-  return {
-    commandId,
-    timeout,
-    isRetriable,
-  };
-}
-
-function formatSoftAssertionError(error: any, timeout: number, isRetriable: boolean) {
-  const message = String(error?.message || error);
-
-  if (isRetriable && !/Timed out retrying after/i.test(message)) {
-    return {
-      ...error,
-      message: `Timed out retrying after ${timeout}ms: ${message}`,
-    };
-  }
-
-  return error;
-}
-
-/**
- * Intercept Chai assertions and make them soft in soft_it() tests.
+ * Intercept Cypress failures and make assertion failures soft in soft_it() tests.
  */
 function setupSoftAssertions() {
-  if (!originalAssert) {
-    originalAssert = (chai as any).Assertion.prototype.assert;
-  }
-
-  (chai as any).Assertion.prototype.assert = function (...args: any[]) {
-    if (!isInSoftTest) {
-      return originalAssert.apply(this, args);
-    }
-
-    const context = getAssertionContext();
-
-    try {
-      const result = originalAssert.apply(this, args);
-
-      if (context.commandId) {
-        retryWindows.delete(context.commandId);
-      }
-
-      return result;
-    } catch (rawError: any) {
-      const error = formatSoftAssertionError(rawError, context.timeout, context.isRetriable);
-
-      if (context.isRetriable && context.commandId) {
-        const currentWindow = retryWindows.get(context.commandId) || {
-          startedAt: Date.now(),
-          timeout: context.timeout,
-        };
-
-        retryWindows.set(context.commandId, currentWindow);
-        const elapsed = Date.now() - currentWindow.startedAt;
-
-        if (elapsed < currentWindow.timeout) {
-          throw rawError;
-        }
-
-        retryWindows.delete(context.commandId);
+  if (!activeFailHandler) {
+    activeFailHandler = (error: any) => {
+      if (!isInSoftTest) {
+        throw error;
       }
 
       captureSoftAssertion(error);
+      return false;
+    };
+
+    Cypress.on('fail', activeFailHandler);
+  }
+}
+
+function getTestTitle(test: any) {
+  if (test && typeof test.fullTitle === 'function') {
+    return test.fullTitle();
+  }
+
+  return String(test?.title || '');
+}
+
+function installFinalizer() {
+  if (finalizerInstalled) {
+    return;
+  }
+
+  afterEach(function (this: Mocha.Context) {
+    if (!isInSoftTest) {
       return;
     }
-  };
+
+    const currentTest = (this.currentTest || this.test) as Mocha.Test & { err?: Error; state?: string };
+    if (!currentTest || getTestTitle(currentTest) !== activeSoftTestTitle) {
+      return;
+    }
+
+    const finalError = finalizeSoftTest();
+    if (!finalError) {
+      return;
+    }
+
+    currentTest.err = finalError;
+    currentTest.state = 'failed';
+
+    const runner = (Cypress as any)?.mocha?.getRunner?.();
+    if (runner && typeof runner.fail === 'function') {
+      runner.fail(currentTest, finalError);
+      return;
+    }
+
+    throw finalError;
+  });
+
+  finalizerInstalled = true;
 }
 
 /**
  * Restore original Chai assertion behavior.
  */
 function restoreAssertions() {
-  retryWindows.clear();
-
-  if (originalAssert) {
-    (chai as any).Assertion.prototype.assert = originalAssert;
+  if (activeFailHandler) {
+    Cypress.off('fail', activeFailHandler);
+    activeFailHandler = null;
   }
 }
 
@@ -187,6 +142,7 @@ function buildSoftAssertionError() {
 function finalizeSoftTest() {
   isInSoftTest = false;
   restoreAssertions();
+  activeSoftTestTitle = null;
   return buildSoftAssertionError();
 }
 
@@ -196,16 +152,20 @@ function finalizeSoftTest() {
 function abortSoftTest() {
   isInSoftTest = false;
   restoreAssertions();
+  activeSoftTestTitle = null;
 }
 
 /**
  * Create a soft_it variant from a Mocha it function.
  */
 function createSoftIt(baseIt: typeof it) {
+  installFinalizer();
+
   return function (title: string, fn: Mocha.Func | Mocha.AsyncFunc) {
     return baseIt(title, function (this: Mocha.Context) {
       isInSoftTest = true;
       softAssertionErrors = [];
+      activeSoftTestTitle = getTestTitle(this.currentTest || this.test);
       setupSoftAssertions();
 
       try {
@@ -214,39 +174,13 @@ function createSoftIt(baseIt: typeof it) {
         if (result && typeof (result as any).then === 'function') {
           return (result as any)
             .catch((error: any) => {
-              if (error?.name === 'AssertionError') {
-                captureSoftAssertion(error);
-                return;
-              }
-
               abortSoftTest();
               throw error;
-            })
-            .then(() => cy.wrap(null).then(() => {
-              const finalError = finalizeSoftTest();
-              if (finalError) {
-                throw finalError;
-              }
-            }));
+            });
         }
 
-        return cy.wrap(null).then(() => {
-          const finalError = finalizeSoftTest();
-          if (finalError) {
-            throw finalError;
-          }
-        });
+        return result;
       } catch (error) {
-        if ((error as any)?.name === 'AssertionError') {
-          captureSoftAssertion(error);
-          return cy.wrap(null).then(() => {
-            const finalError = finalizeSoftTest();
-            if (finalError) {
-              throw finalError;
-            }
-          });
-        }
-
         abortSoftTest();
         throw error;
       }
