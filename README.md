@@ -1,103 +1,90 @@
 # Cypress Soft Assertions
 
-A Cypress plugin that provides `soft_it()` - a drop-in replacement for `it()` that makes all assertions soft. Assertions continue execution on failure, and all failures are aggregated and reported at the end of the test.
+A Cypress plugin that provides `soft_it()` — a drop-in replacement for `it()` that makes all assertions soft. Assertions continue execution on failure, and all failures are aggregated and reported together at the end of the test.
 
-## Overview
+## Why?
 
 Standard Cypress assertions stop test execution at the first failure. With `soft_it()`:
 
-- All assertions run even if some fail
-- See all failures at once - no need to fix one issue and rerun to find the next
-- Drop-in replacement - just change `it()` to `soft_it()`
-- No manual tracking - failures automatically aggregated and reported
+- **All assertions run** even if some fail
+- **See all failures at once** — no need to fix one issue and rerun to find the next
+- **Drop-in replacement** — just change `it()` to `soft_it()`
+- **No manual tracking** — failures are automatically aggregated and reported
 
 ## Installation
-
-Install the plugin as a development dependency:
 
 ```bash
 npm install @koenvanbelle/cypress-soft-assertions --save-dev
 ```
 
-or using Yarn:
+## Setup
 
-```bash
-yarn add @koenvanbelle/cypress-soft-assertions --dev
-```
+### 1. Import the plugin
 
-## Integration
-
-### Step 1: Import the Plugin
-
-Add the import to your Cypress support file. This registers the `soft_it()` function globally.
-
-**For TypeScript projects** - Edit `cypress/support/e2e.ts` (or `cypress/support/commands.ts`):
+Add the import to your Cypress support file (`cypress/support/e2e.ts` or `cypress/support/e2e.js`):
 
 ```typescript
 import '@koenvanbelle/cypress-soft-assertions';
 ```
 
-**For JavaScript projects** - Edit `cypress/support/e2e.js` (or `cypress/support/commands.js`):
+Or for JavaScript:
 
 ```javascript
 require('@koenvanbelle/cypress-soft-assertions');
 ```
 
-### Step 2: Add Type Definitions (TypeScript only)
+### 2. Add type definitions (TypeScript only)
 
-If you're using TypeScript, ensure your `tsconfig.json` includes the plugin types:
+Add a reference directive at the top of your test files:
+
+```typescript
+/// <reference types="@koenvanbelle/cypress-soft-assertions" />
+```
+
+Or include the types in your `tsconfig.json`:
 
 ```json
 {
   "compilerOptions": {
-    "types": ["cypress", "cypress-soft-assertions"]
+    "types": ["cypress", "@koenvanbelle/cypress-soft-assertions"]
   }
 }
 ```
 
-Alternatively, add a reference directive at the top of your test files:
-
-```typescript
-/// <reference types="cypress-soft-assertions" />
-```
-
-### Step 3: Use in Tests
+## Usage
 
 Replace `it()` with `soft_it()` in any test where you want soft assertion behavior:
 
 ```typescript
 describe('Product Page', () => {
   soft_it('validates all product details', () => {
-    cy.visit('https://example.com/product/123');
-    
-    // All these assertions will run even if some fail
+    cy.visit('/product/123');
+
+    // All assertions run even if some fail
     cy.get('.product-name').should('have.text', 'Awesome Product');
     cy.get('.product-price').should('have.text', '$99.99');
     cy.get('.stock-status').should('have.text', 'In Stock');
-    Supported Assertion Types
+    cy.get('.rating').should('have.attr', 'data-stars', '5');
+  });
+});
+```
+
+### Supported assertion styles
 
 `soft_it()` works with all Cypress assertion styles:
 
 ```typescript
 soft_it('supports all assertion types', () => {
-  cy.visit('/page');
-  
   // .should() assertions
   cy.get('.title').should('be.visible');
   cy.get('.title').should('have.text', 'Welcome');
-  
-  // .should() with callback
-  cy.get('.items').should(($items) => {
-    expect($items).to.have.length(5);
-    expect($items.first()).to.contain('Item 1');
-  });
-  
+
   // expect() in .then()
-  cy.get('.price').then($el => {
+  cy.get('.price').then(($el) => {
     expect($el.text()).to.equal('$99.99');
   });
-  
-  // Chained assertions
+
+  // Chained assertions with .and()
   cy.get('.button')
     .should('be.visible')
     .and('have.class', 'active')
@@ -105,185 +92,73 @@ soft_it('supports all assertion types', () => {
 });
 ```
 
-### Mixing soft_it() with Regular it()
+### Mixing `soft_it()` with regular `it()`
 
-You can use both `soft_it()` and regular `it()` in the same test suite:
+You can use both in the same suite. Regular `it()` tests are unaffected:
 
 ```typescript
 describe('User Profile', () => {
-  // Regular test - stops on first failure
+  // Regular test — stops on first failure
   it('loads the page', () => {
     cy.visit('/profile');
     cy.get('h1').should('be.visible');
   });
-  
-  // Soft test - all assertions run
-  soft_it('validates profile fields', () => {
-    cy.get('.username').should('have.text', 'john_doe');
-    cy.get('.email').should('have.text', 'john@example.com');
-    cy.get('.member-since').should('contain', '2023');
-    cy.get('.posts-count').should('have.text', '42');
-  
-  // Chained assertions
-  cy.get('.button')
-    .should('be.visible')
-    .and('have.class', 'active')
-    .and('contain', 'Submit');
-});
-```
 
-### Multiple Tests
-
-You can mix `soft_it()` with regular `it()` tests:
-
-```typescript
-describe('User Profile', () => {
-  // Regular test - stops on first failure
-  it('loads the page', () => {
-    cy.visit('/profile');
-    cy.get('h1').should('be.visible');
-  });
-  
-  // Soft test - all assertions run
+  // Soft test — all assertions run
   soft_it('validates profile fields', () => {
     cy.get('.username').should('have.text', 'john_doe');
     cy.get('.email').should('have.text', 'john@example.com');
     cy.get('.member-since').should('contain', '2023');
     cy.get('.posts-count').should('have.text', '42');
   });
-  
-  // Another soft test
-  soft_it('validates account settings', () => {
-    cy.get('[data-test=notifications]').should('be.checked');
-    cy.get('[data-test=newsletter]').should('not.be.checked');
-    cy.get('[data-test=theme]').should('have.value', 'dark');
-  });
 });
 ```
 
-### Using soft_it.only and soft_it.skip
+### `soft_it.only` and `soft_it.skip`
 
-Just like regular `it()`:
-
-```typescript
-describe('Test Suite', () => {
-  // Run only this test
-  soft_it.only('validates important fields', () => {
-    cy.get('.field1').should('exist');
-```
-
-The plugin supports `.only` and `.skip` modifiers just like regular `it()`:
+Works just like regular `it()`:
 
 ```typescript
 describe('Test Suite', () => {
-  // Run only this test
-  soft_it.only('validates important fields', () => {
+  soft_it.only('run only this test', () => {
     cy.get('.field1').should('exist');
-    cy.get('.field2').should('exist');
   });
-  
-  // Skip this test
-  soft_it.skip('validates optional fields', () => {
+
+  soft_it.skip('skip this test', () => {
     cy.get('.optional').should('exist');
   });
 });
 ```
 
-## How It Works
+## How it works
 
-`soft_it()` intercepts Chai assertions within the test block and captures failures instead of throwing them immediately. At the end of the test, all captured failures are aggregated and reported in a single error message.
+1. `soft_it()` patches Chai's assertion mechanism for the duration of the test.
+2. When an assertion fails inside a retriable command (`.should()`, `.and()`), the error is staged under a stable token and rethrown so Cypress can retry. If the assertion eventually passes, the staged failure is cleared.
+3. After a bounded number of retries, the assertion is swallowed and the failure is recorded so the test can continue to the next command.
+4. Non-retriable assertion failures (`expect()` in `.then()` callbacks) are captured immediately.
+5. Command-level failures (e.g. element-not-found timeouts) are caught by a `Cypress.on('fail')` handler and recorded as soft failures.
+6. At the end of the test, all recorded failures are aggregated into a single `SoftAssertionError`.
 
-The plugin works with:
-- `.should()` assertions
-- `expect()` assertions
-- `assert()` assertions
-- Custom Cypress commands that use assertions
-- Assertion chains (`.and()`)
+## Error output
 
-## Important Notes
-
-### When Assertions Are Reported
-
-Failures are reported at the end of the test after all Cypress commands complete. The test will be marked as failed, and all assertion failures will be listed together.
-
-### Regular vs Soft Tests
-
-- **Regular `it()`**: Stops at first assertion failure
-- **Soft `soft_it()`**: Runs all assertions, reports all failures at the end
-
-### Non-Assertion Errors
-
-Non-assertion errors (network errors, timeouts, command errors) will still stop test execution immediately. `soft_it()` only makes assertions soft.
-
-```typescript
-soft_it('example', () => {
-  cy.visit('/page');  // If this fails (timeout, 404), test stops immediately
-  cy.get('.missing').should('exist');  // This assertion is soft
-  cy.get('.other').should('exist');    // This assertion is soft
-});
-```
-
-## Best Practices
-
-### Use for Validation-Heavy Tests
-
-`soft_it()` is ideal for tests that validate many fields:
-
-```typescript
-soft_it('validates user profile completeness', () => {
-  cy.get('.name').should('not.be.empty');
-  cy.get('.email').should('match', /@/);
-  cy.get('.phone').should('have.length.at.least', 10);
-  cy.get('.address').should('not.be.empty');
-  cy.get('.city').should('not.be.empty');
-  cy.get('.avatar').should('be.visible');
-});
-```
-
-### Use Regular it() for Critical Setup
-
-Use regular `it()` for setup steps that must succeed:
-
-```typescript
-it('logs in successfully', () => {
-  cy.visit('/login');
-  cy.get('#username').type('user');
-  cy.get('#password').type('pass');
-  cy.get('button[type=submit]').click();
-  cy.url().should('include', '/dashboard');
-});
-
-soft_it('validates dashboard widgets', () => {
-  cy.get('.widget-1').should('be.visible');
-  cy.get('.widget-2').should('be.visible');
-  cy.get('.widget-3').should('be.visible');
-});
-```
-
-### Group Related Validations
-
-Use `soft_it()` to group validations of related elements:
-
-```typescript
-soft_it('validates navigation menu', () => {
-  cy.get('nav a').eq(0).should('have.text', 'Home');
-  cy.get('nav a').eq(1).should('have.text', 'Products');
-  cy.get('nav a').eq(2).should('have.text', 'About');
-  cy.get('nav a').eq(3).should('have.text', 'Contact');
-});
-```
-
-## Error Output Format
-
-When soft assertions fail, you receive a formatted error report:
+When soft assertions fail, you get a single formatted report:
 
 ```
 ================================================================================
-SOFT ASSERTION FAILURES (4 failed):
+SOFT ASSERTION FAILURES (3 failed):
 ================================================================================
-  1. expected '<input#email>' to have value 'test@example.com', but the value was 'wrong@example.com'
-  2. expected '<div.order-total>' to contain '$99.99', but it contained '$89.99'
-  3. expected '<div.tax>' to contain '$8.75', but it contained '$7.50'
-  4. expected '<div.grand-total>' to contain '$113.74', but it contained '$102.49'
+  1. expected '<h1.title>' to have text 'Wrong Title', but the text was 'Products'
+  2. expected '<div.count>' to have text '999', but the text was '42'
+  3. expected '<div.missing>' to exist in the DOM
 ================================================================================
 ```
+
+## Important notes
+
+- **Retriable assertions are retried**: `.should()` and `.and()` assertions are retried by Cypress before being captured as soft failures. Assertions that eventually pass are not reported.
+- **Non-assertion errors still stop execution**: Network errors, visit timeouts, and other command errors are captured as soft failures but may prevent subsequent commands from running.
+- **State resets between tests**: Each `soft_it()` test starts with a clean slate — failures from one test never leak into another.
+
+## License
+
+MIT

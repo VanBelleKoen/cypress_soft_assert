@@ -10,6 +10,7 @@
 
 describe('Soft Assertions with soft_it()', () => {
 
+  // EXPECTED: PASS — all login page elements exist and are correct
   soft_it('validates login page elements', () => {
     cy.visit('/');
 
@@ -21,6 +22,7 @@ describe('Soft Assertions with soft_it()', () => {
     cy.get('.login_credentials').should('be.visible');
   });
 
+  // EXPECTED: FAIL (SoftAssertionError) — .peek element doesn't exist, captured as soft failure
   soft_it('validates product page after login', () => {
     cy.visit('/');
     cy.get('#user-name').type('standard_user');
@@ -35,6 +37,7 @@ describe('Soft Assertions with soft_it()', () => {
     cy.get('.inventory_item_name').first().should('contain', 'Backpack');
   });
 
+  // EXPECTED: PASS — all product detail assertions are correct
   soft_it('validates multiple product details', () => {
     cy.visit('/');
     cy.get('#user-name').type('standard_user');
@@ -53,6 +56,7 @@ describe('Soft Assertions with soft_it()', () => {
     cy.get('.shopping_cart_badge').should('not.exist');
   });
 
+  // EXPECTED: PASS — cart operations and validations all correct
   soft_it('validates cart functionality with soft assertions', () => {
     cy.visit('/');
     cy.get('#user-name').type('standard_user');
@@ -80,6 +84,7 @@ describe('Soft Assertions with soft_it()', () => {
 
 describe('Comparison: Regular it() vs soft_it()', () => {
 
+  // EXPECTED: FAIL — .non-existent element causes hard failure, remaining assertions don't run
   it('regular it() - stops at first failure', () => {
     cy.visit('/');
 
@@ -89,6 +94,7 @@ describe('Comparison: Regular it() vs soft_it()', () => {
     cy.get('#password').should('be.visible'); // This won't run
   });
 
+  // EXPECTED: FAIL (SoftAssertionError) — .non-existent fails softly, remaining assertions still run
   soft_it('soft_it() - runs all assertions', () => {
     cy.visit('/');
 
@@ -101,6 +107,7 @@ describe('Comparison: Regular it() vs soft_it()', () => {
 
 describe('soft_it() with different assertion styles', () => {
 
+  // EXPECTED: PASS — all .should() assertions are correct
   soft_it('supports .should() assertions', () => {
     cy.visit('/');
     cy.get('#user-name').type('standard_user');
@@ -112,6 +119,7 @@ describe('soft_it() with different assertion styles', () => {
     cy.get('.inventory_item').should('have.length.at.least', 1);
   });
 
+  // EXPECTED: PASS — expect() calls inside .then() all correct
   soft_it('supports expect() in .then()', () => {
     cy.visit('/');
     cy.get('#user-name').type('standard_user');
@@ -129,6 +137,7 @@ describe('soft_it() with different assertion styles', () => {
     });
   });
 
+  // EXPECTED: FAIL (SoftAssertionError) — button has no explicit type attribute, so have.attr('type', 'button') fails
   soft_it('supports chained assertions', () => {
     cy.visit('/');
     cy.get('#user-name').type('standard_user');
@@ -144,11 +153,13 @@ describe('soft_it() with different assertion styles', () => {
 
 describe('Testing soft_it.only and soft_it.skip', () => {
 
+  // EXPECTED: PASS — element exists on the page
   soft_it('this test runs normally', () => {
     cy.visit('/');
     cy.get('.login_logo').should('exist');
   });
 
+  // EXPECTED: SKIPPED — soft_it.skip skips the test entirely
   soft_it.skip('this test is skipped', () => {
     cy.visit('/');
     cy.get('.something').should('exist');
@@ -163,6 +174,7 @@ describe('Testing soft_it.only and soft_it.skip', () => {
 
 describe('Demonstrating failure aggregation', () => {
 
+  // EXPECTED: FAIL (SoftAssertionError) — 3 intentionally wrong assertions aggregated into one error
   soft_it('shows multiple failures in one report', () => {
     cy.visit('/');
     cy.get('#user-name').type('standard_user');
