@@ -155,6 +155,21 @@ describe('soft_it plugin behavior', () => {
     cy.get('#counter').should('have.text', '1');
   });
 
+  // EXPECTED: PASS — DOM updates after 2s, explicit timeout of 4s allows retry to succeed
+  soft_it('respects per-command timeout for slow DOM updates', () => {
+    cy.document().then((doc) => {
+      setTimeout(() => {
+        const status = doc.getElementById('status');
+        if (status) {
+          status.textContent = 'loaded';
+        }
+      }, 2000);
+    });
+
+    cy.get('#status', { timeout: 4000 }).should('have.text', 'loaded');
+    cy.get('#counter').should('have.text', '1');
+  });
+
   // EXPECTED: PASS — .within() block and outer assertions all correct
   soft_it('supports nested command groups and within blocks', () => {
     cy.get('#list').within(() => {
@@ -163,6 +178,45 @@ describe('soft_it plugin behavior', () => {
     });
 
     cy.get('#primary-btn').should('have.class', 'active');
+  });
+
+  // EXPECTED: PASS — failing assertion inside .within() captured, commands after .within() still run
+  soft_it('captures soft failures inside within blocks', () => {
+    expectSoftFailure();
+
+    cy.get('#list').within(() => {
+      cy.get('.item').should('have.length', 99); // wrong — captured as soft failure
+      cy.get('.item').first().should('have.text', 'Alpha'); // should still run
+    });
+
+    cy.get('#primary-btn').should('have.class', 'active'); // should still run
+  });
+
+  // EXPECTED: PASS — failing assertion on element without id inside .within() is captured correctly
+  soft_it('captures soft failures on elements without id inside within blocks', () => {
+    expectSoftFailure();
+
+    cy.get('#list').within(() => {
+      cy.get('.item').first().should('have.text', 'WRONG'); // no id on .item elements
+      cy.get('.item').eq(1).should('have.text', 'Beta'); // should still run and pass
+    });
+
+    cy.get('#counter').should('have.text', '1'); // should still run
+  });
+
+  // EXPECTED: PASS — forEach loop with .should() inside .within() captures failures correctly
+  soft_it('captures soft failures from forEach loops inside within blocks', () => {
+    expectSoftFailure();
+
+    const expectedClasses = ['item', 'missing-class', 'another-missing'];
+
+    cy.get('#list').within(() => {
+      expectedClasses.forEach((className) => {
+        cy.get('li').first().should('have.class', className);
+      });
+    });
+
+    cy.get('#counter').should('have.text', '1'); // should still run after .within()
   });
 
   // EXPECTED: PASS — wrong assertion produces SoftAssertionError (captured by expectSoftFailure)

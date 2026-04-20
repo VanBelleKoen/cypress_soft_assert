@@ -158,6 +158,7 @@ SOFT ASSERTION FAILURES (3 failed):
 - **Retriable assertions are retried**: `.should()` and `.and()` assertions are retried by Cypress before being captured as soft failures. Assertions that eventually pass are not reported.
 - **Non-assertion errors still stop execution**: Network errors, visit timeouts, and other command errors are captured as soft failures but may prevent subsequent commands from running.
 - **State resets between tests**: Each `soft_it()` test starts with a clean slate — failures from one test never leak into another.
+- **Cypress Studio / Command Log**: When a soft assertion fails definitively, the plugin swallows the error so the test can continue. Cypress treats the command as resolved, which means it may not appear as a failed step in the Cypress Studio command log or may look like the assertion was skipped. The assertions **do** execute and failures **are** captured — they just don't show visually in the command log. Check the final `SoftAssertionError` report for the complete list of failures.
 
 ## License
 

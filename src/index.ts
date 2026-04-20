@@ -13,16 +13,21 @@ interface ErrorEntry {
 
 let softAssertionErrors: ErrorEntry[] = [];
 let retryAssertionFailures = new Map<string, ErrorEntry>();
-let retryAttemptCount = new Map<string, number>();
+let retryFirstSeen = new Map<string, number>();
 let isInSoftTest = false;
 let activeFailHandler: ((error: any) => false | void) | null = null;
 let originalChaiAssert: ((...args: any[]) => any) | null = null;
 
-// After this many consecutive assertion failures on the same token, stop
-// rethrowing (which would cause Cypress to retry) and swallow instead.
-// This gives Cypress enough retry cycles for assertions that will eventually
-// pass, while bounding the time spent on definitively failing assertions.
-const MAX_RETHROWS = 10;
+function getEffectiveTimeout() {
+  try {
+    const current = (cy as any).state('current');
+    const perCommand = current?.get?.('timeout');
+    if (typeof perCommand === 'number') return perCommand;
+  } catch { /* ignore */ }
+  try {
+    return Cypress.config('defaultCommandTimeout') as number || 4000;
+  } catch { return 4000; }
+}
 
 function captureSoftAssertion(error: any) {
   const message = error?.message || String(error);
@@ -81,7 +86,7 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
       const token = getAssertionToken(this, args);
       if (token) {
         retryAssertionFailures.delete(token);
-        retryAttemptCount.delete(token);
+        retryFirstSeen.delete(token);
       }
     }
 
@@ -99,19 +104,26 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
         stack: (error as any)?.stack,
       });
 
-      const attempts = (retryAttemptCount.get(token) || 0) + 1;
-      retryAttemptCount.set(token, attempts);
+      const now = Date.now();
+      if (!retryFirstSeen.has(token)) {
+        retryFirstSeen.set(token, now);
+      }
 
-      if (attempts <= MAX_RETHROWS) {
-        // Rethrow to let Cypress retry the assertion. This gives retriable
-        // commands (should/and, retried from get/contains/etc.) a window
-        // to eventually pass.
+      const elapsed = now - retryFirstSeen.get(token)!;
+      const timeout = getEffectiveTimeout();
+
+      // Use 75% of the timeout as the retry window. This ensures the plugin
+      // swallows the error before Cypress's own timeout fires (which would
+      // route through the fail handler and prevent finalization).
+      if (elapsed < timeout * 0.75) {
+        // Still within the command timeout window — rethrow to let Cypress
+        // retry the assertion. If it eventually passes, the token is cleared.
         throw error;
       }
 
-      // Past the retry budget — swallow so the command "succeeds" and Cypress
-      // moves on to the next queued command. The token stays in the Map and
-      // will be promoted to softAssertionErrors at finalization.
+      // Past the timeout budget — swallow so the command "succeeds" and
+      // Cypress moves on to the next queued command. The token stays in the
+      // Map and will be promoted to softAssertionErrors at finalization.
       return;
     }
 
@@ -159,7 +171,7 @@ function buildSoftAssertionError() {
     captureSoftAssertion(entry);
   }
   retryAssertionFailures.clear();
-  retryAttemptCount.clear();
+  retryFirstSeen.clear();
 
   if (softAssertionErrors.length > 0) {
     const errorMessages = softAssertionErrors
@@ -196,7 +208,7 @@ function abortSoftTest() {
   isInSoftTest = false;
   restoreAssertions();
   retryAssertionFailures.clear();
-  retryAttemptCount.clear();
+  retryFirstSeen.clear();
 }
 
 function createSoftIt(baseIt: typeof it) {
@@ -205,7 +217,7 @@ function createSoftIt(baseIt: typeof it) {
       isInSoftTest = true;
       softAssertionErrors = [];
       retryAssertionFailures.clear();
-      retryAttemptCount.clear();
+      retryFirstSeen.clear();
       setupSoftAssertions();
 
       let result: unknown;
