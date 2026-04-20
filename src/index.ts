@@ -133,27 +133,14 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
         stack: (error as any)?.stack,
       });
 
-      const now = Date.now();
       if (!retryFirstSeen.has(token)) {
-        retryFirstSeen.set(token, now);
+        retryFirstSeen.set(token, Date.now());
       }
 
-      const elapsed = now - retryFirstSeen.get(token)!;
-      const timeout = getEffectiveTimeout();
-
-      // Use 75% of the timeout as the retry window. This ensures the plugin
-      // swallows the error before Cypress's own timeout fires (which would
-      // route through the fail handler and prevent finalization).
-      if (elapsed < timeout * 0.75) {
-        // Still within the command timeout window — rethrow to let Cypress
-        // retry the assertion. If it eventually passes, the token is cleared.
-        throw error;
-      }
-
-      // Past the timeout budget — swallow so the command "succeeds" and
-      // Cypress moves on to the next queued command. The token stays in the
-      // Map and will be promoted to softAssertionErrors at finalization.
-      return;
+      // Always rethrow to let Cypress use its full retry/timeout window.
+      // When the timeout expires, Cypress fires the fail event; our fail
+      // handler captures it and clears the staged entry to avoid duplicates.
+      throw error;
     }
 
     // No identifiable subject from the DOM. If we're inside a retryable
@@ -168,20 +155,12 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
         stack: (error as any)?.stack,
       });
 
-      const now = Date.now();
       if (!retryFirstSeen.has(fallbackToken)) {
-        retryFirstSeen.set(fallbackToken, now);
+        retryFirstSeen.set(fallbackToken, Date.now());
       }
 
-      const elapsed = now - retryFirstSeen.get(fallbackToken)!;
-      const timeout = getEffectiveTimeout();
-
-      if (elapsed < timeout * 0.75) {
-        throw error;
-      }
-
-      // Past retry budget — swallow and let Cypress move on.
-      return;
+      // Always rethrow to let Cypress use its full retry/timeout window.
+      throw error;
     }
 
     // Bare expect() in .then() callbacks — capture directly.
@@ -202,6 +181,18 @@ function setupSoftAssertions() {
       // Non-assertion command failures (e.g. element not found timeouts)
       // are captured as soft failures.
       captureSoftAssertion(error);
+
+      // Clear any matching retry-tracked entry to prevent double-counting
+      // at finalization (the fail handler is now the authoritative capture).
+      const errorMsg = error?.message || String(error);
+      for (const [token, entry] of retryAssertionFailures.entries()) {
+        if (entry.message === errorMsg) {
+          retryAssertionFailures.delete(token);
+          retryFirstSeen.delete(token);
+          break;
+        }
+      }
+
       return false;
     };
 
@@ -222,9 +213,13 @@ function restoreAssertions() {
 }
 
 function buildSoftAssertionError() {
-  // Promote any remaining retry-tracked failures.
+  // Promote any remaining retry-tracked failures that weren't already
+  // captured by the fail handler (dedup by message).
   for (const entry of retryAssertionFailures.values()) {
-    captureSoftAssertion(entry);
+    const isDuplicate = softAssertionErrors.some(e => e.message === entry.message);
+    if (!isDuplicate) {
+      softAssertionErrors.push(entry);
+    }
   }
   retryAssertionFailures.clear();
   retryFirstSeen.clear();
