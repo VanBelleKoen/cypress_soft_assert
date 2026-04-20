@@ -266,4 +266,52 @@ describe('soft_it plugin behavior', () => {
     cy.get('#title').should('contain.text', 'Fixture');
     cy.get('#list .item').should('have.length', 3);
   });
+
+  // EXPECTED: PASS — non-DOM .should() that eventually passes is retried, no soft failure
+  soft_it('retries non-DOM assertions in .should() until they pass', () => {
+    // Simulate a window property that changes from true to false after 50ms
+    // (similar to Nuxt isHydrating pattern)
+    cy.window().then((win) => {
+      (win as any).__testHydrating = true;
+      setTimeout(() => {
+        (win as any).__testHydrating = false;
+      }, 50);
+    });
+
+    cy.window({ timeout: 2000 }).should((win) => {
+      expect((win as any).__testHydrating).to.eq(false);
+    });
+
+    // This assertion should still run and pass
+    cy.get('#title').should('have.text', 'Soft Assertions Fixture');
+  });
+
+  // EXPECTED: PASS — non-DOM .should() that never passes is captured as soft failure
+  soft_it('captures non-DOM .should() failure as soft failure when retries are exhausted', () => {
+    expectSoftFailure();
+
+    cy.window().then((win) => {
+      (win as any).__testHydrating = true;
+      // Never changes to false
+    });
+
+    cy.window({ timeout: 500 }).should((win) => {
+      expect((win as any).__testHydrating).to.eq(false);
+    });
+
+    // This assertion should still run after the soft failure
+    cy.get('#title').should('have.text', 'Soft Assertions Fixture');
+  });
+
+  // EXPECTED: PASS — bare expect() in .then() still captured immediately (no regression)
+  soft_it('bare expect in .then() is still captured immediately without breaking subsequent assertions', () => {
+    expectSoftFailure();
+
+    cy.get('#counter').then(($el) => {
+      expect($el.text()).to.equal('999'); // wrong — captured immediately
+    });
+
+    cy.get('#title').should('have.text', 'Soft Assertions Fixture'); // should still run
+    cy.get('#list .item').should('have.length', 3); // should still run
+  });
 });

@@ -60,6 +60,27 @@ function toTokenPart(value: any) {
   try { return JSON.stringify(value); } catch { return String(value); }
 }
 
+function getRetryableCommandId(): string {
+  try {
+    const current = (cy as any).state('current');
+    if (!current) return '';
+    // In Cypress 15, inside a .should()/.and() callback, cy.state('current')
+    // points to the parent command (e.g. 'wrap', 'window', 'get'). The
+    // 'followedByShouldCallback' attribute is set to true, and
+    // 'currentAssertionCommand' points to the should/and command object.
+    const assertionCmd = current.get?.('currentAssertionCommand');
+    if (assertionCmd) {
+      const id = assertionCmd.get?.('id') ?? assertionCmd.id ?? '';
+      return id ? String(id) : '';
+    }
+    if (current.get?.('followedByShouldCallback')) {
+      const id = current.get?.('id') ?? '';
+      return id ? String(id) : '';
+    }
+  } catch { /* ignore */ }
+  return '';
+}
+
 function getAssertionToken(assertionContext: any, args: any[]) {
   const subjectKey = getSubjectKey(assertionContext);
   if (!subjectKey) return '';
@@ -87,6 +108,14 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
       if (token) {
         retryAssertionFailures.delete(token);
         retryFirstSeen.delete(token);
+      }
+
+      // Also clear command-based fallback tokens for this command
+      const retryableCid = getRetryableCommandId();
+      if (retryableCid) {
+        const fallbackToken = `__cmd__|${retryableCid}|${toTokenPart(args?.[3])}`;
+        retryAssertionFailures.delete(fallbackToken);
+        retryFirstSeen.delete(fallbackToken);
       }
     }
 
@@ -127,8 +156,35 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
       return;
     }
 
-    // No identifiable subject — capture directly (e.g. bare expect() calls
-    // in .then() callbacks).
+    // No identifiable subject from the DOM. If we're inside a retryable
+    // command (.should() / .and()), derive a token from the command ID so the
+    // retry-window logic still applies (e.g. window property assertions).
+    const retryableCid = getRetryableCommandId();
+    if (retryableCid) {
+      const fallbackToken = `__cmd__|${retryableCid}|${toTokenPart(args?.[3])}`;
+
+      retryAssertionFailures.set(fallbackToken, {
+        message: String((error as any)?.message || error),
+        stack: (error as any)?.stack,
+      });
+
+      const now = Date.now();
+      if (!retryFirstSeen.has(fallbackToken)) {
+        retryFirstSeen.set(fallbackToken, now);
+      }
+
+      const elapsed = now - retryFirstSeen.get(fallbackToken)!;
+      const timeout = getEffectiveTimeout();
+
+      if (elapsed < timeout * 0.75) {
+        throw error;
+      }
+
+      // Past retry budget — swallow and let Cypress move on.
+      return;
+    }
+
+    // Bare expect() in .then() callbacks — capture directly.
     captureSoftAssertion(error);
   }
 }
