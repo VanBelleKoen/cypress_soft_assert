@@ -34,30 +34,35 @@ function mountSoftAssertionsFixture() {
 
 describe('soft_it plugin behavior', () => {
   let expectsSoftFailure = false;
-  let capturedSoftFailure: Error | null = null;
 
   beforeEach(() => {
     expectsSoftFailure = false;
-    capturedSoftFailure = null;
     mountSoftAssertionsFixture();
   });
 
-  afterEach(() => {
-    if (!expectsSoftFailure) {
-      expect(capturedSoftFailure, 'unexpected soft failure').to.equal(null);
-      return;
+  // The plugin's afterEach (registered at root level) calls runner.fail()
+  // AFTER this describe-level afterEach. Use test:after:run to verify
+  // and recover expected soft failures so the spec itself passes green.
+  Cypress.on('test:after:run', (test) => {
+    if (expectsSoftFailure) {
+      if (test.state !== 'failed') {
+        // Expected a SoftAssertionError but didn't get one
+        test.state = 'failed';
+        (test as any).err = new Error(
+          `Expected SoftAssertionError but test passed`
+        );
+        return;
+      }
+      // Verify it's actually a SoftAssertionError, then recover
+      if ((test as any).err?.name === 'SoftAssertionError') {
+        test.state = 'passed';
+        (test as any).err = null;
+      }
     }
-
-    expect(capturedSoftFailure, 'expected a SoftAssertionError').to.be.instanceOf(Error);
-    expect(capturedSoftFailure?.name).to.equal('SoftAssertionError');
   });
 
   function expectSoftFailure() {
     expectsSoftFailure = true;
-    Cypress.once('fail', (error) => {
-      capturedSoftFailure = error as Error;
-      return false;
-    });
   }
 
   // EXPECTED: PASS — verifies soft_it, soft_it.only, and soft_it.skip are registered globally
@@ -65,6 +70,11 @@ describe('soft_it plugin behavior', () => {
     expect(soft_it).to.be.a('function');
     expect(soft_it.only).to.be.a('function');
     expect(soft_it.skip).to.be.a('function');
+  });
+
+  // EXPECTED: SKIPPED — verifies soft_it.skip delegates to it.skip
+  soft_it.skip('skipped test should not execute', () => {
+    throw new Error('This should never run');
   });
 
   // EXPECTED: PASS — all assertions are correct, no soft failures

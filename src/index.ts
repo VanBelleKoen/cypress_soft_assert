@@ -4,6 +4,14 @@
  * Provides soft_it() function that wraps Cypress tests to make all assertions soft.
  * Assertions don't stop execution on failure - they continue and all failures are
  * aggregated and reported at the end of the test.
+ *
+ * Architecture:
+ * - Chai's Assertion.prototype.assert is patched to intercept assertion failures.
+ * - During retries, failures are rethrown so Cypress can retry.
+ * - Once the retry window expires, the error is swallowed (not rethrown).
+ *   This lets Cypress consider the command "passed" and continue the queue.
+ * - A fail handler catches non-assertion errors (e.g. element-not-found timeouts).
+ * - An afterEach hook finalizes: aggregates all failures and reports them.
  */
 
 interface ErrorEntry {
@@ -18,7 +26,7 @@ let isInSoftTest = false;
 let activeFailHandler: ((error: any) => false | void) | null = null;
 let originalChaiAssert: ((...args: any[]) => any) | null = null;
 
-function getEffectiveTimeout() {
+function getEffectiveTimeout(): number {
   try {
     const current = (cy as any).state('current');
     const perCommand = current?.get?.('timeout');
@@ -64,10 +72,6 @@ function getRetryableCommandId(): string {
   try {
     const current = (cy as any).state('current');
     if (!current) return '';
-    // In Cypress 15, inside a .should()/.and() callback, cy.state('current')
-    // points to the parent command (e.g. 'wrap', 'window', 'get'). The
-    // 'followedByShouldCallback' attribute is set to true, and
-    // 'currentAssertionCommand' points to the should/and command object.
     const assertionCmd = current.get?.('currentAssertionCommand');
     if (assertionCmd) {
       const id = assertionCmd.get?.('id') ?? assertionCmd.id ?? '';
@@ -96,6 +100,16 @@ function patchChaiAssertions() {
   assertionProto.assert = patchedAssertionAssert;
 }
 
+function resolveStableToken(assertionContext: any, args: any[]): string {
+  const token = getAssertionToken(assertionContext, args);
+  if (token) return token;
+
+  const retryableCid = getRetryableCommandId();
+  if (retryableCid) return `__cmd__|${retryableCid}|${toTokenPart(args?.[3])}`;
+
+  return '';
+}
+
 function patchedAssertionAssert(this: any, ...args: any[]) {
   if (!originalChaiAssert) return;
 
@@ -104,18 +118,10 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
 
     // Assertion passed — clear any staged failure for this token.
     if (isInSoftTest) {
-      const token = getAssertionToken(this, args);
+      const token = resolveStableToken(this, args);
       if (token) {
         retryAssertionFailures.delete(token);
         retryFirstSeen.delete(token);
-      }
-
-      // Also clear command-based fallback tokens for this command
-      const retryableCid = getRetryableCommandId();
-      if (retryableCid) {
-        const fallbackToken = `__cmd__|${retryableCid}|${toTokenPart(args?.[3])}`;
-        retryAssertionFailures.delete(fallbackToken);
-        retryFirstSeen.delete(fallbackToken);
       }
     }
 
@@ -123,47 +129,44 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
   } catch (error) {
     if (!isInSoftTest) throw error;
 
-    const token = getAssertionToken(this, args);
+    const errorEntry: ErrorEntry = {
+      message: String((error as any)?.message || error),
+      stack: (error as any)?.stack,
+    };
+
+    const token = resolveStableToken(this, args);
 
     if (token) {
-      // Stage the failure under a stable token so it can be cleared if
-      // a later retry succeeds.
-      retryAssertionFailures.set(token, {
-        message: String((error as any)?.message || error),
-        stack: (error as any)?.stack,
-      });
-
+      // Track when we first saw this failure.
       if (!retryFirstSeen.has(token)) {
         retryFirstSeen.set(token, Date.now());
       }
 
-      // Always rethrow to let Cypress use its full retry/timeout window.
-      // When the timeout expires, Cypress fires the fail event; our fail
-      // handler captures it and clears the staged entry to avoid duplicates.
-      throw error;
-    }
+      // Stage the failure so it can be cleared if a later retry succeeds.
+      retryAssertionFailures.set(token, errorEntry);
 
-    // No identifiable subject from the DOM. If we're inside a retryable
-    // command (.should() / .and()), derive a token from the command ID so the
-    // retry-window logic still applies (e.g. window property assertions).
-    const retryableCid = getRetryableCommandId();
-    if (retryableCid) {
-      const fallbackToken = `__cmd__|${retryableCid}|${toTokenPart(args?.[3])}`;
+      // Check if the retry window has expired. Swallow slightly before
+      // Cypress's own timeout to prevent it from firing the fail event.
+      // Cypress retries every ~50ms, so subtracting 100ms ensures we
+      // catch at least 1-2 more retries before the deadline.
+      const elapsed = Date.now() - retryFirstSeen.get(token)!;
+      const timeout = getEffectiveTimeout();
+      const swallowAt = Math.max(timeout - 100, timeout * 0.9);
 
-      retryAssertionFailures.set(fallbackToken, {
-        message: String((error as any)?.message || error),
-        stack: (error as any)?.stack,
-      });
-
-      if (!retryFirstSeen.has(fallbackToken)) {
-        retryFirstSeen.set(fallbackToken, Date.now());
+      if (elapsed < swallowAt) {
+        // Still within the retry window — rethrow so Cypress retries.
+        throw error;
       }
 
-      // Always rethrow to let Cypress use its full retry/timeout window.
-      throw error;
+      // Retry window expired. Swallow the error: Cypress considers the
+      // assertion "passed", the command resolves, and the queue continues.
+      // The failure is already staged in retryAssertionFailures and will
+      // be promoted to softAssertionErrors during finalization.
+      return;
     }
 
-    // Bare expect() in .then() callbacks — capture directly.
+    // No stable token (e.g. bare expect() in .then() callbacks).
+    // Capture directly and swallow so the queue continues.
     captureSoftAssertion(error);
   }
 }
@@ -171,6 +174,8 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
 function setupSoftAssertions() {
   patchChaiAssertions();
 
+  // Fail handler for non-assertion errors (e.g. element-not-found after
+  // cy.get timeout). These don't go through Chai's assert at all.
   if (!activeFailHandler) {
     activeFailHandler = (error: any) => {
       if (!isInSoftTest) throw error;
@@ -178,12 +183,13 @@ function setupSoftAssertions() {
       // Final aggregated error must propagate to fail the test.
       if (String(error?.name || '') === 'SoftAssertionError') throw error;
 
-      // Non-assertion command failures (e.g. element not found timeouts)
-      // are captured as soft failures.
+      // Check if this is an assertion error that was already handled by
+      // patchedAssertionAssert (swallowed after timeout). In that case
+      // the fail handler should NOT fire. But for non-assertion command
+      // failures (e.g. cy.get can't find element), capture as soft failure.
       captureSoftAssertion(error);
 
-      // Clear any matching retry-tracked entry to prevent double-counting
-      // at finalization (the fail handler is now the authoritative capture).
+      // Clear any matching retry-tracked entry to prevent double-counting.
       const errorMsg = error?.message || String(error);
       for (const [token, entry] of retryAssertionFailures.entries()) {
         if (entry.message === errorMsg) {
@@ -271,32 +277,12 @@ function createSoftIt(baseIt: typeof it) {
       retryFirstSeen.clear();
       setupSoftAssertions();
 
-      let result: unknown;
-
       try {
-        result = (fn as any).call(this);
+        return (fn as any).call(this);
       } catch (error) {
         abortSoftTest();
         throw error;
       }
-
-      // Finalize from inside the test chain (not from hooks) so Cypress counts
-      // the failure on the test itself.
-      return cy.then(() => {
-        return Cypress.Promise.resolve(result)
-          .catch((error: any) => {
-            if (isInSoftTest) {
-              abortSoftTest();
-            }
-            throw error;
-          })
-          .then(() => {
-            const finalError = finalizeSoftTest();
-            if (finalError) {
-              throw finalError;
-            }
-          });
-      });
     });
   };
 }
@@ -329,6 +315,25 @@ function createSoftIt(baseIt: typeof it) {
  * soft_it.skip - Skip this soft test
  */
 (globalThis as any).soft_it.skip = it.skip;
+
+// Global afterEach hook: finalize soft assertions after each test.
+// Registered at the root level so it applies to all suites.
+// For non-soft tests (isInSoftTest === false), this is a no-op.
+afterEach(function () {
+  if (!isInSoftTest) return;
+  const finalError = finalizeSoftTest();
+  if (finalError) {
+    // Use runner.fail() to mark the TEST as failed rather than the hook.
+    // Throwing from afterEach would skip remaining tests in the suite.
+    const runner = (Cypress as any).mocha?.getRunner();
+    const test = this.currentTest;
+    if (runner && test) {
+      runner.fail(test, finalError);
+    } else {
+      throw finalError;
+    }
+  }
+});
 
 // Type declarations for TypeScript
 declare global {
