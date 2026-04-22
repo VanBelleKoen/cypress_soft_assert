@@ -14,10 +14,15 @@
  * - An afterEach hook finalizes: aggregates all failures and reports them.
  */
 
-interface ErrorEntry {
-  message: string;
-  stack?: string;
-}
+import {
+  ErrorEntry,
+  toTokenPart,
+  getAssertionToken,
+  appendUniqueError,
+  mergeRetryFailures,
+  resolveToken,
+  formatSoftAssertionErrors,
+} from './utils';
 
 let softAssertionErrors: ErrorEntry[] = [];
 let retryAssertionFailures = new Map<string, ErrorEntry>();
@@ -25,6 +30,10 @@ let retryFirstSeen = new Map<string, number>();
 let isInSoftTest = false;
 let activeFailHandler: ((error: any) => false | void) | null = null;
 let originalChaiAssert: ((...args: any[]) => any) | null = null;
+
+// ---------------------------------------------------------------------------
+// Module-level state
+// ---------------------------------------------------------------------------
 
 function getEffectiveTimeout(): number {
   try {
@@ -37,35 +46,14 @@ function getEffectiveTimeout(): number {
   } catch { return 4000; }
 }
 
+// ---------------------------------------------------------------------------
+// Internal helpers (Cypress-dependent — not unit-testable in isolation)
+// ---------------------------------------------------------------------------
+
 function captureSoftAssertion(error: any) {
   const message = error?.message || String(error);
   const stack = error?.stack;
-
-  const lastEntry = softAssertionErrors[softAssertionErrors.length - 1];
-  if (!lastEntry || lastEntry.message !== message || lastEntry.stack !== stack) {
-    softAssertionErrors.push({ message, stack });
-  }
-}
-
-function getSubjectKey(assertionContext: any) {
-  const obj = assertionContext?._obj;
-  const first = Array.isArray(obj) ? obj[0] : obj?.[0];
-  if (first && typeof first.id === 'string' && first.id.length > 0) {
-    return `#${first.id}`;
-  }
-  const selector = obj?.selector;
-  if (typeof selector === 'string' && selector.length > 0) {
-    return selector;
-  }
-  return '';
-}
-
-function toTokenPart(value: any) {
-  if (value === undefined) return 'undefined';
-  if (value === null) return 'null';
-  const kind = typeof value;
-  if (kind === 'string' || kind === 'number' || kind === 'boolean') return String(value);
-  try { return JSON.stringify(value); } catch { return String(value); }
+  appendUniqueError(softAssertionErrors, message, stack);
 }
 
 function getRetryableCommandId(): string {
@@ -85,13 +73,6 @@ function getRetryableCommandId(): string {
   return '';
 }
 
-function getAssertionToken(assertionContext: any, args: any[]) {
-  const subjectKey = getSubjectKey(assertionContext);
-  if (!subjectKey) return '';
-  const expected = args?.[3];
-  return `${subjectKey}|${toTokenPart(expected)}`;
-}
-
 function patchChaiAssertions() {
   const assertionProto = (chai as any)?.Assertion?.prototype;
   if (!assertionProto || typeof assertionProto.assert !== 'function') return;
@@ -101,13 +82,11 @@ function patchChaiAssertions() {
 }
 
 function resolveStableToken(assertionContext: any, args: any[]): string {
-  const token = getAssertionToken(assertionContext, args);
-  if (token) return token;
-
-  const retryableCid = getRetryableCommandId();
-  if (retryableCid) return `__cmd__|${retryableCid}|${toTokenPart(args?.[3])}`;
-
-  return '';
+  return resolveToken(
+    getAssertionToken(assertionContext, args),
+    getRetryableCommandId(),
+    args,
+  );
 }
 
 function patchedAssertionAssert(this: any, ...args: any[]) {
@@ -221,32 +200,13 @@ function restoreAssertions() {
 function buildSoftAssertionError() {
   // Promote any remaining retry-tracked failures that weren't already
   // captured by the fail handler (dedup by message).
-  for (const entry of retryAssertionFailures.values()) {
-    const isDuplicate = softAssertionErrors.some(e => e.message === entry.message);
-    if (!isDuplicate) {
-      softAssertionErrors.push(entry);
-    }
-  }
+  softAssertionErrors = mergeRetryFailures(softAssertionErrors, retryAssertionFailures);
   retryAssertionFailures.clear();
   retryFirstSeen.clear();
 
-  if (softAssertionErrors.length > 0) {
-    const errorMessages = softAssertionErrors
-      .map((entry, index) => `  ${index + 1}. ${entry.message}`)
-      .join('\n');
-
-    const finalMessage = [
-      '',
-      '='.repeat(80),
-      `SOFT ASSERTION FAILURES (${softAssertionErrors.length} failed):`,
-      '='.repeat(80),
-      errorMessages,
-      '='.repeat(80),
-      '',
-    ].join('\n');
-
+  const finalMessage = formatSoftAssertionErrors(softAssertionErrors);
+  if (finalMessage !== null) {
     softAssertionErrors = [];
-
     const error = new Error(finalMessage);
     error.name = 'SoftAssertionError';
     return error;

@@ -9,7 +9,8 @@
     "prepublishOnly": "npm run build",
     "cy:open": "cypress open",
     "cy:run": "cypress run",
-    "test": "npm run build && cypress run && npm run test:runner",
+    "test": "npm run build && npm run test:unit && cypress run && npm run test:runner",
+    "test:unit": "node --test test/unit.test.mjs",
     "test:runner": "node --test test/runner.test.mjs"
   },
   "keywords": [
