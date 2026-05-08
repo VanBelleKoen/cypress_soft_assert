@@ -1,11 +1,12 @@
 {
   "name": "@koenvanbelle/cypress-soft-assertions",
-  "version": "2.2.1",
+  "version": "2.3.1",
   "description": "A Cypress plugin that provides soft_it() for soft assertions - all assertions continue on failure and are reported together",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build",
     "cy:open": "cypress open",
     "cy:run": "cypress run",
@@ -38,9 +39,10 @@
     "cypress": ">=10.0.0"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "cypress": "^15.9.0",
-    "typescript": "^5.9.3",
-    "@types/mocha": "^10.0.10"
+    "cypress-translation-checker": "^1.3.4",
+    "typescript": "^5.9.3"
   },
   "files": [
     "dist",

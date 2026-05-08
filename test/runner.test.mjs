@@ -102,3 +102,48 @@ describe('programmatic runner: expected-failures fixture', () => {
     assert.ok(!hasSoftAssertionError(test), 'Should not have SoftAssertionError');
   });
 });
+
+describe('programmatic runner: translation-checker interplay fixture', () => {
+  let runs;
+
+  it('runs the interplay fixture spec', async () => {
+    const result = await runSpec('cypress/e2e/fixtures/soft-translation-interplay.cy.ts');
+    assert.ok(result.runs?.length > 0, 'Should have at least one run');
+    runs = result.runs[0];
+    assert.ok(runs.tests?.length > 0, 'Should have tests');
+  });
+
+  it('has the expected number of tests', () => {
+    assert.equal(runs.tests.length, 3);
+  });
+
+  it('has exactly 1 clean passing test', () => {
+    const clean = runs.tests.filter(t => t.state === 'passed' && !hasSoftAssertionError(t));
+    assert.equal(clean.length, 1, `Clean tests: ${clean.map(t => t.title).join(', ')}`);
+  });
+
+  it('has exactly 2 tests with SoftAssertionError', () => {
+    const softFailed = runs.tests.filter(t => hasSoftAssertionError(t));
+    assert.equal(softFailed.length, 2, `Soft-failed tests: ${softFailed.map(t => t.title).join(', ')}`);
+  });
+
+  it('"soft failure still aggregates with translation checker enabled" has SoftAssertionError', () => {
+    const test = findTest(runs, 'soft failure still aggregates with translation checker enabled');
+    assert.ok(test, 'Test should exist');
+    assert.ok(hasSoftAssertionError(test), 'Should have SoftAssertionError');
+    assert.ok(
+      test.displayError.includes('1 failed'),
+      `Expected "1 failed" in displayError, got: ${test.displayError.slice(0, 200)}`
+    );
+  });
+
+  it('"missing element remains a soft failure with translation checker enabled" has SoftAssertionError', () => {
+    const test = findTest(runs, 'missing element remains a soft failure with translation checker enabled');
+    assert.ok(test, 'Test should exist');
+    assert.ok(hasSoftAssertionError(test), 'Should have SoftAssertionError');
+    assert.ok(
+      test.displayError.includes('1 failed'),
+      `Expected "1 failed" in displayError, got: ${test.displayError.slice(0, 200)}`
+    );
+  });
+});

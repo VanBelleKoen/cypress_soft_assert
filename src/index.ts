@@ -16,7 +16,6 @@
 
 import {
   ErrorEntry,
-  toTokenPart,
   getAssertionToken,
   appendUniqueError,
   mergeRetryFailures,
@@ -89,6 +88,16 @@ function resolveStableToken(assertionContext: any, args: any[]): string {
   );
 }
 
+function isRunningHookContext(): boolean {
+  try {
+    const runnable = (cy as any).state('runnable');
+    const type = runnable?.type ?? runnable?._type;
+    return type === 'hook';
+  } catch {
+    return false;
+  }
+}
+
 function patchedAssertionAssert(this: any, ...args: any[]) {
   if (!originalChaiAssert) return;
 
@@ -107,6 +116,7 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
     return result;
   } catch (error) {
     if (!isInSoftTest) throw error;
+    if (isRunningHookContext()) throw error;
 
     const errorEntry: ErrorEntry = {
       message: String((error as any)?.message || error),
@@ -158,6 +168,7 @@ function setupSoftAssertions() {
   if (!activeFailHandler) {
     activeFailHandler = (error: any) => {
       if (!isInSoftTest) throw error;
+      if (isRunningHookContext()) throw error;
 
       // Final aggregated error must propagate to fail the test.
       if (String(error?.name || '') === 'SoftAssertionError') throw error;
@@ -283,10 +294,21 @@ afterEach(function () {
   if (!isInSoftTest) return;
   const finalError = finalizeSoftTest();
   if (finalError) {
-    // Use runner.fail() to mark the TEST as failed rather than the hook.
-    // Throwing from afterEach would skip remaining tests in the suite.
-    const runner = (Cypress as any).mocha?.getRunner();
     const test = this.currentTest;
+    const currentRetry = (test as any)?._currentRetry ?? 0;
+    const maxRetries = (test as any)?._retries ?? 0;
+
+    if (currentRetry < maxRetries) {
+      // Intermediate retry attempt — throw so Cypress triggers the next retry.
+      // Cypress's retry machinery intercepts hook failures during non-final
+      // attempts and does NOT abort the suite, so this is safe here.
+      throw finalError;
+    }
+
+    // Last (or only) attempt — use runner.fail() to mark the TEST as failed
+    // rather than the hook. Throwing from afterEach on the final attempt
+    // would skip remaining tests in the suite.
+    const runner = (Cypress as any).mocha?.getRunner();
     if (runner && test) {
       runner.fail(test, finalError);
     } else {

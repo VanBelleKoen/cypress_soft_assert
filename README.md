@@ -168,6 +168,87 @@ SOFT ASSERTION FAILURES (3 failed):
   ```
 - **Cypress Studio / Command Log**: When a soft assertion fails definitively, the plugin swallows the error so the test can continue. Cypress treats the command as resolved, which means it may not appear as a failed step in the Cypress Studio command log or may look like the assertion was skipped. The assertions **do** execute and failures **are** captured — they just don't show visually in the command log. Check the final `SoftAssertionError` report for the complete list of failures.
 
+## Compatibility: cypress-translation-checker
+
+`@koenvanbelle/cypress-soft-assertions` is compatible with `cypress-translation-checker` (verified with `cypress-translation-checker@1.3.4` and Cypress 15).
+
+### Install
+
+```bash
+npm install --save-dev @koenvanbelle/cypress-soft-assertions cypress-translation-checker
+```
+
+### 1. Register translation-checker tasks in Cypress config
+
+`cypress-translation-checker` uses Cypress tasks to persist collected page results. Add these in `setupNodeEvents`.
+
+```typescript
+import { defineConfig } from 'cypress';
+
+const translationResults = new Map<string, { url: string; errors: any[]; testContext: string }>();
+
+export default defineConfig({
+  e2e: {
+    setupNodeEvents(on, config) {
+      on('task', {
+        storeTranslationResult({
+          url,
+          errors,
+          testContext,
+        }: {
+          url: string;
+          errors: any[];
+          testContext: string;
+        }) {
+          translationResults.set(url, { url, errors, testContext });
+          return null;
+        },
+        getTranslationResults() {
+          return Array.from(translationResults.values());
+        },
+        clearTranslationResults() {
+          translationResults.clear();
+          return null;
+        },
+      });
+
+      return config;
+    },
+  },
+});
+```
+
+### 2. Import both plugins in support file
+
+Enable soft assertions and then enable automatic translation checks.
+
+```typescript
+import '@koenvanbelle/cypress-soft-assertions';
+import { enableAutoTranslationCheck } from 'cypress-translation-checker/commands';
+
+enableAutoTranslationCheck({
+  waitTime: 500,
+});
+```
+
+### 3. Write tests normally with `soft_it`
+
+Soft assertion failures are still aggregated into one `SoftAssertionError` at test end.
+
+```typescript
+soft_it('works with automatic translation checks', () => {
+  cy.visit('/');
+  cy.get('h1').should('have.text', 'Expected title');
+  cy.get('#status').should('have.text', 'Ready');
+});
+```
+
+### Notes
+
+- If translation-checker tasks are missing, Cypress will fail with unknown task errors.
+- Both plugins register hooks/events, but they can run together safely with the setup above.
+- Keep translation-checker in non-invasive mode (`failOnError: false` in auto mode) so functional assertions remain the source of test pass/fail behavior.
+
 ## License
 
 MIT
