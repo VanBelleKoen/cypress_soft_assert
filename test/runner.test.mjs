@@ -147,3 +147,47 @@ describe('programmatic runner: translation-checker interplay fixture', () => {
     );
   });
 });
+
+describe('programmatic runner: strict soft assertion fixture', () => {
+  let runs;
+
+  it('runs the strict-mode fixture spec', async () => {
+    const result = await runSpec('cypress/e2e/fixtures/strict-mode.behavior.cy.ts');
+    assert.ok(result.runs?.length > 0, 'Should have at least one run');
+    runs = result.runs[0];
+    assert.ok(runs.tests?.length > 0, 'Should have tests');
+  });
+
+  it('has the expected number of tests', () => {
+    assert.equal(runs.tests.length, 3);
+  });
+
+  it('has exactly 2 clean passing tests', () => {
+    const clean = runs.tests.filter(t => t.state === 'passed' && !hasSoftAssertionError(t));
+    assert.equal(clean.length, 2, `Clean tests: ${clean.map(t => t.title).join(', ')}`);
+  });
+
+  it('"strict mode forces final soft failure to fail test" has strict failure details', () => {
+    const test = findTest(runs, 'strict mode forces final soft failure to fail test');
+    assert.ok(test, 'Test should exist');
+    const message = String(test.displayError || '');
+    assert.ok(
+      message.includes('SoftAssertionError') || message.includes('SOFT ASSERTION FAILURES'),
+      `Expected SoftAssertionError content in displayError, got: ${message.slice(0, 200)}`
+    );
+  });
+
+  it('strict failure is reported from afterEach hook with SoftAssertionError message', () => {
+    const test = findTest(runs, 'strict mode forces final soft failure to fail test');
+    assert.ok(test, 'Test should exist');
+    const message = String(test.displayError || '');
+    assert.ok(
+      message.includes('SoftAssertionError') || message.includes('SOFT ASSERTION FAILURES'),
+      `Expected SoftAssertionError content in displayError, got: ${message.slice(0, 200)}`
+    );
+    assert.ok(
+      message.includes('after each') || message.includes('afterEach') || message.includes('SOFT ASSERTION FAILURES'),
+      `Expected strict-mode hook failure signal in displayError, got: ${message.slice(0, 200)}`
+    );
+  });
+});

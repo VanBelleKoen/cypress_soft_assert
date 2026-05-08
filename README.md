@@ -249,6 +249,36 @@ soft_it('works with automatic translation checks', () => {
 - Both plugins register hooks/events, but they can run together safely with the setup above.
 - Keep translation-checker in non-invasive mode (`failOnError: false` in auto mode) so functional assertions remain the source of test pass/fail behavior.
 
+## Force-Fail Hook (strict mode)
+
+If your project (or another plugin) mutates test state in hooks (for example in `test:after:run`) and soft-failed tests appear as passed, enable strict mode per test:
+
+```typescript
+soft_it.strict('fails hard when soft assertions are captured', () => {
+  cy.visit('/');
+  cy.get('#title').should('have.text', 'Wrong Title');
+  cy.get('#status').should('have.text', 'Ready');
+});
+```
+
+You can also use `soft_it.strict.only(...)` and `soft_it.strict.skip(...)`.
+
+To force strict mode for all soft tests in a run, use env flags:
+
+```bash
+cypress run --env softAssertForceFail=true
+```
+
+You can also use:
+
+```bash
+cypress run --env SOFT_ASSERT_FORCE_FAIL=true
+```
+
+When strict mode is enabled (per test or via env), the plugin throws the final `SoftAssertionError` from `afterEach` on the last attempt, preventing downstream hook-based recovery from turning the test green.
+
+Note: strict mode may abort remaining tests in the same suite after the first forced soft failure (standard Cypress hook-failure behavior).
+
 ## License
 
 MIT

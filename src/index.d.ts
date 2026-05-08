@@ -18,6 +18,17 @@ declare global {
     /** Run only this test (like it.only) */
     function only(title: string, fn: Mocha.Func | Mocha.AsyncFunc): Mocha.Test;
 
+    /** Run this soft test in strict mode */
+    function strict(title: string, fn: Mocha.Func | Mocha.AsyncFunc): Mocha.Test;
+
+    namespace strict {
+      /** Run only this strict soft test */
+      function only(title: string, fn: Mocha.Func | Mocha.AsyncFunc): Mocha.Test;
+
+      /** Skip this strict soft test */
+      function skip(title: string, fn: Mocha.Func | Mocha.AsyncFunc): void;
+    }
+
     /** Skip this test (like it.skip) */
     function skip(title: string, fn: Mocha.Func | Mocha.AsyncFunc): void;
   }

@@ -27,6 +27,7 @@ let softAssertionErrors: ErrorEntry[] = [];
 let retryAssertionFailures = new Map<string, ErrorEntry>();
 let retryFirstSeen = new Map<string, number>();
 let isInSoftTest = false;
+let forceFailCurrentSoftTest = false;
 let activeFailHandler: ((error: any) => false | void) | null = null;
 let originalChaiAssert: ((...args: any[]) => any) | null = null;
 
@@ -43,6 +44,23 @@ function getEffectiveTimeout(): number {
   try {
     return Cypress.config('defaultCommandTimeout') as number || 4000;
   } catch { return 4000; }
+}
+
+function isTruthy(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function shouldForceFailSoftAssertions(): boolean {
+  try {
+    const env = (Cypress as any).env?.bind(Cypress);
+    if (!env) return false;
+    return isTruthy(env('softAssertForceFail')) || isTruthy(env('SOFT_ASSERT_FORCE_FAIL'));
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -228,21 +246,24 @@ function buildSoftAssertionError() {
 
 function finalizeSoftTest() {
   isInSoftTest = false;
+  forceFailCurrentSoftTest = false;
   restoreAssertions();
   return buildSoftAssertionError();
 }
 
 function abortSoftTest() {
   isInSoftTest = false;
+  forceFailCurrentSoftTest = false;
   restoreAssertions();
   retryAssertionFailures.clear();
   retryFirstSeen.clear();
 }
 
-function createSoftIt(baseIt: typeof it) {
+function createSoftIt(baseIt: typeof it, options?: { strict?: boolean }) {
   return function (title: string, fn: Mocha.Func | Mocha.AsyncFunc) {
     return baseIt(title, function (this: Mocha.Context) {
       isInSoftTest = true;
+      forceFailCurrentSoftTest = Boolean(options?.strict) || shouldForceFailSoftAssertions();
       softAssertionErrors = [];
       retryAssertionFailures.clear();
       retryFirstSeen.clear();
@@ -283,9 +304,27 @@ function createSoftIt(baseIt: typeof it) {
 (globalThis as any).soft_it.only = createSoftIt(it.only as typeof it);
 
 /**
+ * soft_it.strict - Run this soft test in strict mode.
+ *
+ * Strict mode throws the final SoftAssertionError from afterEach on the
+ * last attempt, making the failure unrecoverable by downstream hooks.
+ */
+(globalThis as any).soft_it.strict = createSoftIt(it, { strict: true });
+
+/**
+ * soft_it.strict.only - Run only this strict soft test
+ */
+(globalThis as any).soft_it.strict.only = createSoftIt(it.only as typeof it, { strict: true });
+
+/**
  * soft_it.skip - Skip this soft test
  */
 (globalThis as any).soft_it.skip = it.skip;
+
+/**
+ * soft_it.strict.skip - Skip this strict soft test
+ */
+(globalThis as any).soft_it.strict.skip = it.skip;
 
 // Global afterEach hook: finalize soft assertions after each test.
 // Registered at the root level so it applies to all suites.
@@ -308,6 +347,13 @@ afterEach(function () {
     // Last (or only) attempt — use runner.fail() to mark the TEST as failed
     // rather than the hook. Throwing from afterEach on the final attempt
     // would skip remaining tests in the suite.
+    if (forceFailCurrentSoftTest) {
+      // Strict mode: force an unrecoverable hook failure.
+      // This guarantees a failed result even when other plugins mutate
+      // test state in test:after:run.
+      throw finalError;
+    }
+
     const runner = (Cypress as any).mocha?.getRunner();
     if (runner && test) {
       runner.fail(test, finalError);
@@ -345,6 +391,19 @@ declare global {
      * Run only this test (like it.only)
      */
     function only(title: string, fn: Mocha.Func | Mocha.AsyncFunc): Mocha.Test;
+
+    /**
+     * Run this soft test in strict mode (force unrecoverable failure)
+     */
+    function strict(title: string, fn: Mocha.Func | Mocha.AsyncFunc): Mocha.Test;
+
+    namespace strict {
+      /** Run only this strict soft test */
+      function only(title: string, fn: Mocha.Func | Mocha.AsyncFunc): Mocha.Test;
+
+      /** Skip this strict soft test */
+      function skip(title: string, fn: Mocha.Func | Mocha.AsyncFunc): void;
+    }
 
     /**
      * Skip this test (like it.skip)

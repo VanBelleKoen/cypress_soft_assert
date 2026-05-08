@@ -54,7 +54,15 @@ describe('soft_it plugin behavior', () => {
         return;
       }
       // Verify it's actually a SoftAssertionError, then recover
-      if ((test as any).err?.name === 'SoftAssertionError') {
+      const errName = String((test as any).err?.name || '');
+      const errMessage = String((test as any).err?.message || '');
+      const displayError = String((test as any).displayError || '');
+      const isSoftFailure = errName === 'SoftAssertionError'
+        || errMessage.includes('SOFT ASSERTION FAILURES')
+        || displayError.includes('SoftAssertionError')
+        || displayError.includes('SOFT ASSERTION FAILURES');
+
+      if (isSoftFailure) {
         test.state = 'passed';
         (test as any).err = null;
       }
