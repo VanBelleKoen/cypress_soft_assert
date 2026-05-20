@@ -130,6 +130,23 @@ describe('Test Suite', () => {
 });
 ```
 
+### `soft_it.expectFailure`
+
+Use `soft_it.expectFailure()` for browser behavior specs that intentionally trigger
+soft failures but should still finish green overall.
+
+```typescript
+soft_it.expectFailure('captures a known soft failure without failing the spec', () => {
+  cy.get('#title').should('have.text', 'Wrong Title');
+  cy.get('#status').should('have.text', 'Ready');
+});
+```
+
+This mode still verifies that a final `SoftAssertionError` was produced. If the
+test completes without any soft failure, the test fails.
+
+`soft_it.expectFailure.only(...)` is also available.
+
 ## How it works
 
 1. `soft_it()` patches Chai's assertion mechanism for the duration of the test.
@@ -158,7 +175,7 @@ SOFT ASSERTION FAILURES (3 failed):
 - **Retriable assertions are retried**: `.should()` and `.and()` assertions are retried by Cypress before being captured as soft failures. Assertions that eventually pass are not reported.
 - **Non-assertion errors still stop execution**: Network errors, visit timeouts, and other command errors are captured as soft failures but may prevent subsequent commands from running.
 - **State resets between tests**: Each `soft_it()` test starts with a clean slate — failures from one test never leak into another.
-- **Timeout-aware retries**: The plugin respects Cypress's `defaultCommandTimeout` and per-command `{ timeout }` overrides. Retriable assertions (`.should()`, `.and()`) are retried for up to 75% of the effective timeout before being captured as soft failures. For slow applications, increase the timeout to give assertions more time to pass:
+- **Timeout-aware retries**: The plugin respects Cypress's `defaultCommandTimeout` and per-command `{ timeout }` overrides. Retriable assertions (`.should()`, `.and()`) are retried until just before the effective timeout expires, using `max(timeout - 100ms, timeout * 0.9)` as the swallow threshold. For slow applications, increase the timeout to give assertions more time to pass:
   ```typescript
   // Global: set in cypress.config.ts
   e2e: { defaultCommandTimeout: 10000 }
@@ -248,36 +265,6 @@ soft_it('works with automatic translation checks', () => {
 - If translation-checker tasks are missing, Cypress will fail with unknown task errors.
 - Both plugins register hooks/events, but they can run together safely with the setup above.
 - Keep translation-checker in non-invasive mode (`failOnError: false` in auto mode) so functional assertions remain the source of test pass/fail behavior.
-
-## Force-Fail Hook (strict mode)
-
-If your project (or another plugin) mutates test state in hooks (for example in `test:after:run`) and soft-failed tests appear as passed, enable strict mode per test:
-
-```typescript
-soft_it.strict('fails hard when soft assertions are captured', () => {
-  cy.visit('/');
-  cy.get('#title').should('have.text', 'Wrong Title');
-  cy.get('#status').should('have.text', 'Ready');
-});
-```
-
-You can also use `soft_it.strict.only(...)` and `soft_it.strict.skip(...)`.
-
-To force strict mode for all soft tests in a run, use env flags:
-
-```bash
-cypress run --env softAssertForceFail=true
-```
-
-You can also use:
-
-```bash
-cypress run --env SOFT_ASSERT_FORCE_FAIL=true
-```
-
-When strict mode is enabled (per test or via env), the plugin throws the final `SoftAssertionError` from `afterEach` on the last attempt, preventing downstream hook-based recovery from turning the test green.
-
-Note: strict mode may abort remaining tests in the same suite after the first forced soft failure (standard Cypress hook-failure behavior).
 
 ## License
 

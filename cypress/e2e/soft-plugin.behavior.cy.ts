@@ -33,45 +33,9 @@ function mountSoftAssertionsFixture() {
 }
 
 describe('soft_it plugin behavior', () => {
-  let expectsSoftFailure = false;
-
   beforeEach(() => {
-    expectsSoftFailure = false;
     mountSoftAssertionsFixture();
   });
-
-  // The plugin's afterEach (registered at root level) calls runner.fail()
-  // AFTER this describe-level afterEach. Use test:after:run to verify
-  // and recover expected soft failures so the spec itself passes green.
-  Cypress.on('test:after:run', (test) => {
-    if (expectsSoftFailure) {
-      if (test.state !== 'failed') {
-        // Expected a SoftAssertionError but didn't get one
-        test.state = 'failed';
-        (test as any).err = new Error(
-          `Expected SoftAssertionError but test passed`
-        );
-        return;
-      }
-      // Verify it's actually a SoftAssertionError, then recover
-      const errName = String((test as any).err?.name || '');
-      const errMessage = String((test as any).err?.message || '');
-      const displayError = String((test as any).displayError || '');
-      const isSoftFailure = errName === 'SoftAssertionError'
-        || errMessage.includes('SOFT ASSERTION FAILURES')
-        || displayError.includes('SoftAssertionError')
-        || displayError.includes('SOFT ASSERTION FAILURES');
-
-      if (isSoftFailure) {
-        test.state = 'passed';
-        (test as any).err = null;
-      }
-    }
-  });
-
-  function expectSoftFailure() {
-    expectsSoftFailure = true;
-  }
 
   // EXPECTED: PASS — verifies soft_it, soft_it.only, and soft_it.skip are registered globally
   it('registers global soft_it helpers', () => {
@@ -112,9 +76,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — two wrong assertions are captured as soft failures, two correct ones still run
-  soft_it('continues executing commands after soft assertion failures', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('continues executing commands after soft assertion failures', () => {
     cy.get('#title').should('have.text', 'Wrong Title');
     cy.get('#secondary-btn').should('contain.text', 'Not Cancel');
 
@@ -123,27 +85,21 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — three wrong assertions aggregated into one SoftAssertionError
-  soft_it('aggregates multiple failures into one final soft error', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('aggregates multiple failures into one final soft error', () => {
     cy.get('#title').should('have.text', 'Mismatch 1');
     cy.get('#counter').should('have.text', '999');
     cy.get('#secondary-btn').should('have.class', 'missing-class');
   });
 
   // EXPECTED: PASS — missing element timeout is captured as soft, remaining assertions still run
-  soft_it('continues to execute assertions after one timeout-style failure', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('continues to execute assertions after one timeout-style failure', () => {
     cy.get('#missing-element', { timeout: 100 }).should('exist');
     cy.get('#counter').should('have.text', '1');
     cy.get('#secondary-btn').should('contain.text', 'Cancel');
   });
 
   // EXPECTED: PASS — mixed expect() failure in .then() + passing .should() assertions
-  soft_it('supports mixed assertion styles while still reporting a single soft failure at test end', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('supports mixed assertion styles while still reporting a single soft failure at test end', () => {
     cy.get('#title').then(($title) => {
       expect($title.text()).to.equal('Wrong Title');
     });
@@ -153,8 +109,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — non-existent element timeout captured as SoftAssertionError
-  soft_it('captures timeout-based should failures', () => {
-    expectSoftFailure();
+  soft_it.expectFailure('captures timeout-based should failures', () => {
     cy.get('#eventual-element', { timeout: 120 }).should('exist');
   });
 
@@ -199,9 +154,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — failing assertion inside .within() captured, commands after .within() still run
-  soft_it('captures soft failures inside within blocks', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('captures soft failures inside within blocks', () => {
     cy.get('#list').within(() => {
       cy.get('.item').should('have.length', 99); // wrong — captured as soft failure
       cy.get('.item').first().should('have.text', 'Alpha'); // should still run
@@ -211,9 +164,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — failing assertion on element without id inside .within() is captured correctly
-  soft_it('captures soft failures on elements without id inside within blocks', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('captures soft failures on elements without id inside within blocks', () => {
     cy.get('#list').within(() => {
       cy.get('.item').first().should('have.text', 'WRONG'); // no id on .item elements
       cy.get('.item').eq(1).should('have.text', 'Beta'); // should still run and pass
@@ -223,9 +174,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — forEach loop with .should() inside .within() captures failures correctly
-  soft_it('captures soft failures from forEach loops inside within blocks', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('captures soft failures from forEach loops inside within blocks', () => {
     const expectedClasses = ['item', 'missing-class', 'another-missing'];
 
     cy.get('#list').within(() => {
@@ -238,9 +187,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — bare expect() inside .within()/.then() is captured, later commands still run
-  soft_it('captures bare expect failures inside within/.then without breaking flow', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('captures bare expect failures inside within/.then without breaking flow', () => {
     cy.get('#list').within(() => {
       cy.get('.item').then(($items) => {
         expect($items).to.have.length(99); // wrong — captured immediately
@@ -271,9 +218,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — non-DOM .should() inside .within() that never passes is captured as soft failure
-  soft_it('captures non-DOM .should() failure inside within blocks', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('captures non-DOM .should() failure inside within blocks', () => {
     cy.window().then((win) => {
       (win as any).__withinNeverReady = false;
       // Never changes to true
@@ -290,8 +235,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — wrong assertion produces SoftAssertionError (captured by expectSoftFailure)
-  soft_it('resets state between soft_it tests (first test)', () => {
-    expectSoftFailure();
+  soft_it.expectFailure('resets state between soft_it tests (first test)', () => {
     cy.get('#title').should('have.text', 'Wrong In First Test');
   });
 
@@ -310,9 +254,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — early expect() failure captured, later .should() assertions still run
-  soft_it('keeps later assertions runnable when an expect callback fails early', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('keeps later assertions runnable when an expect callback fails early', () => {
     cy.get('#counter').then(($counter) => {
       expect($counter.text()).to.equal('2');
     });
@@ -357,9 +299,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — non-DOM .should() that never passes is captured as soft failure
-  soft_it('captures non-DOM .should() failure as soft failure when retries are exhausted', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('captures non-DOM .should() failure as soft failure when retries are exhausted', () => {
     cy.window().then((win) => {
       (win as any).__testHydrating = true;
       // Never changes to false
@@ -374,9 +314,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — bare expect() in .then() still captured immediately (no regression)
-  soft_it('bare expect in .then() is still captured immediately without breaking subsequent assertions', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('bare expect in .then() is still captured immediately without breaking subsequent assertions', () => {
     cy.get('#counter').then(($el) => {
       expect($el.text()).to.equal('999'); // wrong — captured immediately
     });
@@ -421,9 +359,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — one element is permanently hidden; captured as soft failure, rest still pass
-  soft_it('forEach with .within() captures hidden element as soft failure and continues', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('forEach with .within() captures hidden element as soft failure and continues', () => {
     // Permanently hide #status
     cy.get('#status').invoke('css', 'display', 'none');
 
@@ -455,9 +391,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — forEach + .within() with one hidden no-id element, rest pass
-  soft_it('forEach with .within() captures failure on class-only element and continues', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('forEach with .within() captures failure on class-only element and continues', () => {
     // Hide the second list item
     cy.get('.item').eq(1).invoke('css', 'display', 'none');
 
@@ -503,9 +437,7 @@ describe('soft_it plugin behavior', () => {
   });
 
   // EXPECTED: PASS — same as above but second container's .btn is hidden
-  soft_it('forEach with .within() using same selector captures correct failure', () => {
-    expectSoftFailure();
-
+  soft_it.expectFailure('forEach with .within() using same selector captures correct failure', () => {
     cy.document().then((doc) => {
       doc.open();
       doc.write(`

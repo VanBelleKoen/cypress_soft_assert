@@ -66,6 +66,10 @@ describe('programmatic runner: expected-failures fixture', () => {
   it('has exactly 2 tests with SoftAssertionError', () => {
     const softFailed = runs.tests.filter(t => hasSoftAssertionError(t));
     assert.equal(softFailed.length, 2, `Soft-failed tests: ${softFailed.map(t => t.title).join(', ')}`);
+    // Verify that soft-failed tests are reported with state 'failed' in cypress.run() API
+    for (const t of softFailed) {
+      assert.equal(t.state, 'failed', `Expected state 'failed' for "${t.title}", got '${t.state}'`);
+    }
   });
 
   it('"two soft failures aggregated" has SoftAssertionError with 2 failures', () => {
@@ -125,6 +129,10 @@ describe('programmatic runner: translation-checker interplay fixture', () => {
   it('has exactly 2 tests with SoftAssertionError', () => {
     const softFailed = runs.tests.filter(t => hasSoftAssertionError(t));
     assert.equal(softFailed.length, 2, `Soft-failed tests: ${softFailed.map(t => t.title).join(', ')}`);
+    // Verify that soft-failed tests are reported with state 'failed' in cypress.run() API
+    for (const t of softFailed) {
+      assert.equal(t.state, 'failed', `Expected state 'failed' for "${t.title}", got '${t.state}'`);
+    }
   });
 
   it('"soft failure still aggregates with translation checker enabled" has SoftAssertionError', () => {
@@ -148,10 +156,10 @@ describe('programmatic runner: translation-checker interplay fixture', () => {
   });
 });
 
-describe('programmatic runner: strict soft assertion fixture', () => {
+describe('programmatic runner: final soft assertion failure fixture', () => {
   let runs;
 
-  it('runs the strict-mode fixture spec', async () => {
+  it('runs the final-failure fixture spec', async () => {
     const result = await runSpec('cypress/e2e/fixtures/strict-mode.behavior.cy.ts');
     assert.ok(result.runs?.length > 0, 'Should have at least one run');
     runs = result.runs[0];
@@ -167,8 +175,8 @@ describe('programmatic runner: strict soft assertion fixture', () => {
     assert.equal(clean.length, 2, `Clean tests: ${clean.map(t => t.title).join(', ')}`);
   });
 
-  it('"strict mode forces final soft failure to fail test" has strict failure details', () => {
-    const test = findTest(runs, 'strict mode forces final soft failure to fail test');
+  it('"final soft failure is reported as failed test" has failure details', () => {
+    const test = findTest(runs, 'final soft failure is reported as failed test');
     assert.ok(test, 'Test should exist');
     const message = String(test.displayError || '');
     assert.ok(
@@ -177,17 +185,13 @@ describe('programmatic runner: strict soft assertion fixture', () => {
     );
   });
 
-  it('strict failure is reported from afterEach hook with SoftAssertionError message', () => {
-    const test = findTest(runs, 'strict mode forces final soft failure to fail test');
+  it('final soft failure is reported with SoftAssertionError message', () => {
+    const test = findTest(runs, 'final soft failure is reported as failed test');
     assert.ok(test, 'Test should exist');
     const message = String(test.displayError || '');
     assert.ok(
       message.includes('SoftAssertionError') || message.includes('SOFT ASSERTION FAILURES'),
       `Expected SoftAssertionError content in displayError, got: ${message.slice(0, 200)}`
-    );
-    assert.ok(
-      message.includes('after each') || message.includes('afterEach') || message.includes('SOFT ASSERTION FAILURES'),
-      `Expected strict-mode hook failure signal in displayError, got: ${message.slice(0, 200)}`
     );
   });
 });
