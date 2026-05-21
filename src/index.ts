@@ -174,6 +174,14 @@ function setupSoftAssertions() {
       // Final aggregated error must propagate to fail the test.
       if (String(error?.name || '') === 'SoftAssertionError') throw error;
 
+      const runnable = (cy as any).state('runnable');
+      const retryStatusInfo = getRetryStatusInfo(runnable);
+
+      if (retryStatusInfo.shouldAttemptsContinue) {
+        abortSoftTest();
+        throw error;
+      }
+
       // Check if this is an assertion error that was already handled by
       // patchedAssertionAssert (swallowed after timeout). In that case
       // the fail handler should NOT fire. But for non-assertion command
@@ -242,6 +250,47 @@ function abortSoftTest() {
   retryFirstSeen.clear();
 }
 
+function getRetryStatusInfo(test: any) {
+  const currentRetry = typeof test?.currentRetry === 'function'
+    ? test.currentRetry()
+    : typeof Cypress.currentRetry === 'number'
+      ? Cypress.currentRetry
+      : 0;
+
+  const maxRetries = typeof test?.retries === 'function'
+    ? test.retries()
+    : typeof test?._retries === 'number'
+      ? test._retries
+      : typeof Cypress.getTestRetries === 'function'
+        ? Cypress.getTestRetries() ?? 0
+        : 0;
+
+  return {
+    attempts: currentRetry + 1,
+    shouldAttemptsContinue: currentRetry < maxRetries,
+  };
+}
+
+function finalizeSoftTestInQueue(expectsSoftFailure: boolean) {
+  return cy.then(() => {
+    if (!isInSoftTest) return;
+
+    const finalError = finalizeSoftTest();
+
+    if (expectsSoftFailure) {
+      if (!finalError) {
+        throw new Error('Expected SoftAssertionError but soft_it.expectFailure test completed without one.');
+      }
+
+      return;
+    }
+
+    if (finalError) {
+      throw finalError;
+    }
+  });
+}
+
 function createSoftIt(baseIt: typeof it, options?: { expectFailure?: boolean }) {
   return function (title: string, fn: Mocha.Func | Mocha.AsyncFunc) {
     return baseIt(title, function (this: Mocha.Context) {
@@ -253,7 +302,16 @@ function createSoftIt(baseIt: typeof it, options?: { expectFailure?: boolean }) 
       setupSoftAssertions();
 
       try {
-        return (fn as any).call(this);
+        const result = (fn as any).call(this);
+
+        if (result && typeof (result as PromiseLike<unknown>).then === 'function' && !Cypress.isCy(result)) {
+          return Cypress.Promise.resolve(result).then(() => {
+            finalizeSoftTestInQueue(expectSoftFailureCurrentSoftTest);
+          });
+        }
+
+        finalizeSoftTestInQueue(expectSoftFailureCurrentSoftTest);
+        return result;
       } catch (error) {
         abortSoftTest();
         throw error;
@@ -318,11 +376,17 @@ afterEach(function () {
   if (finalError) {
     const test = (this as any).currentTest;
     if (test) {
+      const retryStatusInfo = getRetryStatusInfo(test);
+
+      if (retryStatusInfo.shouldAttemptsContinue) {
+        throw finalError;
+      }
+
       test.err = finalError;
       test._cypressTestStatusInfo = {
         outerStatus: 'failed',
-        shouldAttemptsContinue: false,
-        attempts: typeof test.currentRetry === 'function' ? test.currentRetry() + 1 : 1,
+        shouldAttemptsContinue: retryStatusInfo.shouldAttemptsContinue,
+        attempts: retryStatusInfo.attempts,
         strategy: 'detect-flake-and-pass-on-threshold',
       };
 

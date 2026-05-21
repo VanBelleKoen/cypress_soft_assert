@@ -195,3 +195,30 @@ describe('programmatic runner: final soft assertion failure fixture', () => {
     );
   });
 });
+
+describe('programmatic runner: Cypress retries fixture', () => {
+  let runs;
+
+  it('runs the retries fixture spec', async () => {
+    const result = await runSpec('cypress/e2e/fixtures/retries.behavior.cy.ts');
+    assert.ok(result.runs?.length > 0, 'Should have at least one run');
+    runs = result.runs[0];
+    assert.ok(runs.tests?.length > 0, 'Should have tests');
+  });
+
+  it('retries the failed soft_it and reports a passing final result', () => {
+    const test = findTest(runs, 'retries the test and passes on the second attempt');
+    assert.ok(test, 'Test should exist');
+    assert.equal(test.state, 'passed');
+    assert.ok(!hasSoftAssertionError(test), 'Should not have SoftAssertionError after retry success');
+  });
+
+  it('records more than one attempt for the retried soft_it', () => {
+    const test = findTest(runs, 'retries the test and passes on the second attempt');
+    assert.ok(test, 'Test should exist');
+    assert.ok(Array.isArray(test.attempts), 'Expected test.attempts to be present');
+    assert.equal(test.attempts.length, 2, `Expected 2 attempts, got ${test.attempts?.length}`);
+    assert.equal(test.attempts[0]?.state, 'failed');
+    assert.equal(test.attempts[1]?.state, 'passed');
+  });
+});
