@@ -79,10 +79,12 @@ export function mergeRetryFailures(
   retryFailures: Map<string, ErrorEntry>
 ): ErrorEntry[] {
   const result = [...softErrors];
+  const seenMessages = new Set(result.map(e => e.message));
+
   for (const entry of retryFailures.values()) {
-    const isDuplicate = result.some(e => e.message === entry.message);
-    if (!isDuplicate) {
+    if (!seenMessages.has(entry.message)) {
       result.push(entry);
+      seenMessages.add(entry.message);
     }
   }
   return result;

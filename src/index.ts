@@ -82,11 +82,13 @@ function patchChaiAssertions() {
 }
 
 function resolveStableToken(assertionContext: any, args: any[]): string {
-  return resolveToken(
-    getAssertionToken(assertionContext, args),
-    getRetryableCommandId(),
-    args,
-  );
+  const assertionToken = getAssertionToken(assertionContext, args);
+  if (assertionToken) return assertionToken;
+
+  const commandId = getRetryableCommandId();
+  if (commandId) return resolveToken('', commandId, args);
+
+  return '';
 }
 
 function isRunningHookContext(): boolean {
@@ -102,21 +104,23 @@ function isRunningHookContext(): boolean {
 function patchedAssertionAssert(this: any, ...args: any[]) {
   if (!originalChaiAssert) return;
 
+  // Fast path for non-soft tests: avoid try/catch and token logic entirely.
+  if (!isInSoftTest) {
+    return originalChaiAssert.apply(this, args);
+  }
+
   try {
     const result = originalChaiAssert.apply(this, args);
 
     // Assertion passed — clear any staged failure for this token.
-    if (isInSoftTest) {
-      const token = resolveStableToken(this, args);
-      if (token) {
-        retryAssertionFailures.delete(token);
-        retryFirstSeen.delete(token);
-      }
+    const token = resolveStableToken(this, args);
+    if (token) {
+      retryAssertionFailures.delete(token);
+      retryFirstSeen.delete(token);
     }
 
     return result;
   } catch (error) {
-    if (!isInSoftTest) throw error;
     if (isRunningHookContext()) throw error;
 
     const errorEntry: ErrorEntry = {
@@ -127,25 +131,31 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
     const token = resolveStableToken(this, args);
 
     if (token) {
-      // Track when we first saw this failure.
-      if (!retryFirstSeen.has(token)) {
-        retryFirstSeen.set(token, Date.now());
-      }
-
       // Stage the failure so it can be cleared if a later retry succeeds.
       retryAssertionFailures.set(token, errorEntry);
 
-      // Check if the retry window has expired. Swallow slightly before
-      // Cypress's own timeout to prevent it from firing the fail event.
-      // Cypress retries every ~50ms, so subtracting 100ms ensures we
-      // catch at least 1-2 more retries before the deadline.
-      const elapsed = Date.now() - retryFirstSeen.get(token)!;
+      const current = (cy as any).state('current');
+      const wallClockStartedAt = current?.get?.('wallClockStartedAt');
       const timeout = getEffectiveTimeout();
-      const swallowAt = Math.max(timeout - 100, timeout * 0.9);
 
-      if (elapsed < swallowAt) {
-        // Still within the retry window — rethrow so Cypress retries.
-        throw error;
+      if (typeof wallClockStartedAt === 'number') {
+        const totalElapsed = Date.now() - wallClockStartedAt;
+        // Swallow only when very close to the actual command timeout.
+        // A 20ms buffer maximizes retry attempts while still preventing
+        // Cypress's global fail handler from aborting the test queue.
+        if (totalElapsed < timeout - 20) {
+          throw error;
+        }
+      } else {
+        // Fallback for cases where wallClockStartedAt is missing.
+        if (!retryFirstSeen.has(token)) {
+          retryFirstSeen.set(token, Date.now());
+        }
+        const elapsed = Date.now() - retryFirstSeen.get(token)!;
+        const swallowAt = Math.max(timeout - 100, timeout * 0.9);
+        if (elapsed < swallowAt) {
+          throw error;
+        }
       }
 
       // Retry window expired. Swallow the error: Cypress considers the
