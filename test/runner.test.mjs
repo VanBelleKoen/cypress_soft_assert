@@ -213,8 +213,40 @@ describe('programmatic runner: Cypress retries fixture', () => {
     assert.ok(!hasSoftAssertionError(test), 'Should not have SoftAssertionError after retry success');
   });
 
+  it('clears captured soft errors before a successful retry attempt is reported', () => {
+    const test = findTest(runs, 'clears captured soft errors when a failed attempt is retried');
+    assert.ok(test, 'Test should exist');
+    assert.equal(test.state, 'passed');
+    assert.ok(!hasSoftAssertionError(test), 'Should not have SoftAssertionError after retry success');
+  });
+
   it('records more than one attempt for the retried soft_it', () => {
     const test = findTest(runs, 'retries the test and passes on the second attempt');
+    assert.ok(test, 'Test should exist');
+    assert.ok(Array.isArray(test.attempts), 'Expected test.attempts to be present');
+    assert.equal(test.attempts.length, 2, `Expected 2 attempts, got ${test.attempts?.length}`);
+    assert.equal(test.attempts[0]?.state, 'failed');
+    assert.equal(test.attempts[1]?.state, 'passed');
+  });
+
+  it('records both attempts for the mixed soft-plus-hard retry case', () => {
+    const test = findTest(runs, 'clears captured soft errors when a failed attempt is retried');
+    assert.ok(test, 'Test should exist');
+    assert.ok(Array.isArray(test.attempts), 'Expected test.attempts to be present');
+    assert.equal(test.attempts.length, 2, `Expected 2 attempts, got ${test.attempts?.length}`);
+    assert.equal(test.attempts[0]?.state, 'failed');
+    assert.equal(test.attempts[1]?.state, 'passed');
+  });
+
+  it('does not report stale soft errors for selector-suffix assertions after Cypress retry', () => {
+    const test = findTest(runs, 'does not leak selector-only soft failures across Cypress test retries');
+    assert.ok(test, 'Test should exist');
+    assert.equal(test.state, 'passed');
+    assert.ok(!hasSoftAssertionError(test), 'Should not have SoftAssertionError after retry success');
+  });
+
+  it('records both attempts for the selector-suffix Cypress retry case', () => {
+    const test = findTest(runs, 'does not leak selector-only soft failures across Cypress test retries');
     assert.ok(test, 'Test should exist');
     assert.ok(Array.isArray(test.attempts), 'Expected test.attempts to be present');
     assert.equal(test.attempts.length, 2, `Expected 2 attempts, got ${test.attempts?.length}`);

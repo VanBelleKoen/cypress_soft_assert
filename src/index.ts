@@ -26,6 +26,7 @@ import {
 let softAssertionErrors: ErrorEntry[] = [];
 let retryAssertionFailures = new Map<string, ErrorEntry>();
 let retryFirstSeen = new Map<string, number>();
+let retryTokenCommandIds = new Map<string, string>();
 let isInSoftTest = false;
 let expectSoftFailureCurrentSoftTest = false;
 let activeFailHandler: ((error: any) => false | void) | null = null;
@@ -44,6 +45,13 @@ function getEffectiveTimeout(): number {
   try {
     return Cypress.config('defaultCommandTimeout') as number || 4000;
   } catch { return 4000; }
+}
+
+function getRetryWindowBuffer(timeout: number): number {
+  // Leave Cypress as much of the command timeout as possible before
+  // switching to soft-mode, while keeping a small guard against the
+  // global fail handler aborting the queue at the exact timeout edge.
+  return Math.max(5, Math.min(10, Math.floor(timeout * 0.01)));
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +81,18 @@ function getRetryableCommandId(): string {
   return '';
 }
 
+function clearRetryFailuresForCommand(commandId: string) {
+  if (!commandId) return;
+
+  for (const [token, tokenCommandId] of retryTokenCommandIds.entries()) {
+    if (tokenCommandId === commandId) {
+      retryAssertionFailures.delete(token);
+      retryFirstSeen.delete(token);
+      retryTokenCommandIds.delete(token);
+    }
+  }
+}
+
 function patchChaiAssertions() {
   const assertionProto = (chai as any)?.Assertion?.prototype;
   if (!assertionProto || typeof assertionProto.assert !== 'function') return;
@@ -82,11 +102,14 @@ function patchChaiAssertions() {
 }
 
 function resolveStableToken(assertionContext: any, args: any[]): string {
+  const commandId = getRetryableCommandId();
+  // Prefer command-scoped tokens for retryable assertions because the
+  // subject shape can change between retries (e.g. selector-only before
+  // element exists, element object after it appears).
+  if (commandId) return resolveToken('', commandId, args);
+
   const assertionToken = getAssertionToken(assertionContext, args);
   if (assertionToken) return assertionToken;
-
-  const commandId = getRetryableCommandId();
-  if (commandId) return resolveToken('', commandId, args);
 
   return '';
 }
@@ -114,9 +137,13 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
 
     // Assertion passed — clear any staged failure for this token.
     const token = resolveStableToken(this, args);
+    const commandId = getRetryableCommandId();
+    clearRetryFailuresForCommand(commandId);
+
     if (token) {
       retryAssertionFailures.delete(token);
       retryFirstSeen.delete(token);
+      retryTokenCommandIds.delete(token);
     }
 
     return result;
@@ -129,21 +156,19 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
     };
 
     const token = resolveStableToken(this, args);
+    const commandId = getRetryableCommandId();
 
     if (token) {
-      // Stage the failure so it can be cleared if a later retry succeeds.
-      retryAssertionFailures.set(token, errorEntry);
-
       const current = (cy as any).state('current');
       const wallClockStartedAt = current?.get?.('wallClockStartedAt');
       const timeout = getEffectiveTimeout();
+      const retryWindowBuffer = getRetryWindowBuffer(timeout);
 
       if (typeof wallClockStartedAt === 'number') {
         const totalElapsed = Date.now() - wallClockStartedAt;
-        // Swallow only when very close to the actual command timeout.
-        // A 20ms buffer maximizes retry attempts while still preventing
-        // Cypress's global fail handler from aborting the test queue.
-        if (totalElapsed < timeout - 20) {
+        // Swallow only at the very end of the command timeout. This keeps
+        // late-arriving DOM updates eligible for one more Cypress retry.
+        if (totalElapsed < timeout - retryWindowBuffer) {
           throw error;
         }
       } else {
@@ -152,16 +177,21 @@ function patchedAssertionAssert(this: any, ...args: any[]) {
           retryFirstSeen.set(token, Date.now());
         }
         const elapsed = Date.now() - retryFirstSeen.get(token)!;
-        const swallowAt = Math.max(timeout - 100, timeout * 0.9);
+        const swallowAt = timeout - retryWindowBuffer;
         if (elapsed < swallowAt) {
           throw error;
         }
       }
 
-      // Retry window expired. Swallow the error: Cypress considers the
-      // assertion "passed", the command resolves, and the queue continues.
-      // The failure is already staged in retryAssertionFailures and will
-      // be promoted to softAssertionErrors during finalization.
+      // Retry window expired. Record this as a final retry-tracked failure
+      // and swallow it so the queue can continue to subsequent commands.
+      retryAssertionFailures.set(token, errorEntry);
+      if (commandId) {
+        retryTokenCommandIds.set(token, commandId);
+      }
+
+      // Cypress now considers the command resolved, and the failure will be
+      // promoted to softAssertionErrors during finalization.
       return;
     }
 
@@ -204,6 +234,7 @@ function setupSoftAssertions() {
         if (entry.message === errorMsg) {
           retryAssertionFailures.delete(token);
           retryFirstSeen.delete(token);
+          retryTokenCommandIds.delete(token);
           break;
         }
       }
@@ -233,6 +264,7 @@ function buildSoftAssertionError() {
   softAssertionErrors = mergeRetryFailures(softAssertionErrors, retryAssertionFailures);
   retryAssertionFailures.clear();
   retryFirstSeen.clear();
+  retryTokenCommandIds.clear();
 
   const finalMessage = formatSoftAssertionErrors(softAssertionErrors);
   if (finalMessage !== null) {
@@ -256,8 +288,10 @@ function abortSoftTest() {
   isInSoftTest = false;
   expectSoftFailureCurrentSoftTest = false;
   restoreAssertions();
+  softAssertionErrors = [];
   retryAssertionFailures.clear();
   retryFirstSeen.clear();
+  retryTokenCommandIds.clear();
 }
 
 function getRetryStatusInfo(test: any) {
@@ -309,6 +343,7 @@ function createSoftIt(baseIt: typeof it, options?: { expectFailure?: boolean }) 
       softAssertionErrors = [];
       retryAssertionFailures.clear();
       retryFirstSeen.clear();
+      retryTokenCommandIds.clear();
       setupSoftAssertions();
 
       try {
